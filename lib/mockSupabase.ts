@@ -220,6 +220,7 @@ export const mockSupabase = {
             if (user) {
                 userId = user.id;
             } else {
+                // Supabase Auth 세션이 없으면 로컬 스토리지에서 백업용 ID라도 찾음
                 const sessionStr = localStorage.getItem(STORAGE_KEYS.SESSION);
                 const localUser = sessionStr ? JSON.parse(sessionStr) : null;
                 if (localUser) userId = localUser.id;
@@ -229,8 +230,8 @@ export const mockSupabase = {
                 return { success: false, mode: 'LOCAL', message: '로그인 정보가 유효하지 않아 DB에 저장할 수 없습니다.' };
             }
 
-            // 3. DB Insert (컬럼 매핑 명시화 - 사용자 요청 반영)
-            // Integration.tsx에서 넘어오는 credentials의 키와 DB 컬럼명을 명확히 매칭합니다.
+            // 3. [핵심] DB 컬럼 매핑 (Mapping Logic)
+            // Integration.tsx의 MARKETS 상수 정의에 따라 키값이 다름을 처리
             let vendorId = '';
             let accessKey = '';
             let secretKey = '';
@@ -267,19 +268,22 @@ export const mockSupabase = {
             }
 
             try {
-                // DB 테이블 스키마(snake_case)에 맞춘 페이로드 생성
+                // 4. DB 저장 시도 (snake_case 컬럼 사용)
                 const payload = {
-                    user_id: userId,
+                    user_id: userId,          // 1. 유저 ID
                     market_type: account.marketType,
                     account_name: account.accountName,
                     is_active: account.isActive,
-                    vendor_id: vendorId,     // 매핑된 값
-                    access_key: accessKey,   // 매핑된 값
-                    secret_key: secretKey    // 매핑된 값
+                    
+                    // 2. 매핑된 변수 사용
+                    vendor_id: vendorId,     
+                    access_key: accessKey,   
+                    secret_key: secretKey    
                 };
 
                 const { error } = await supabase.from('market_accounts').insert(payload);
 
+                // 5. 에러 핸들링
                 if (error) {
                     console.error("DB Insert Error:", error);
                     return { success: false, mode: 'LOCAL', message: `DB 저장 실패: ${error.message}` };
@@ -331,6 +335,7 @@ export const mockSupabase = {
                         isActive: item.is_active,
                         createdAt: item.created_at,
                         credentials: {
+                            // 역방향 매핑 (DB -> Frontend)
                             vendorId: item.vendor_id || '',
                             accessKey: item.access_key || '',
                             secretKey: item.secret_key || '',
