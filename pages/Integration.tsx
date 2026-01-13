@@ -122,10 +122,11 @@ const Integration = () => {
         setFormCredentials(prev => ({ ...prev, [key]: value }));
     };
 
-    // [수정됨] 마켓 계정 저장 함수 (직접 Supabase 호출 + trim 적용)
+    // [핵심 로직] 마켓 계정 저장 함수
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         
+        // 1. 유효성 검사 (필수 입력 확인)
         const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
         if (!formAlias) return alert("계정 별칭을 입력해주세요.");
         for (const field of currentMarket!.fields) {
@@ -135,93 +136,99 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // 1. Supabase 연결 체크
+            // 2. DB 연결 체크
             if (!supabase) {
                 throw new Error("DB 연결이 설정되지 않았습니다. [시스템 설정]에서 DB를 연결해주세요.");
             }
 
-            // 2. 현재 로그인된 유저 확인
+            // 3. User ID 가져오기 (supabase.auth.getUser 사용)
             const { data: { user }, error: userError } = await supabase.auth.getUser();
             if (userError || !user) {
-                throw new Error("로그인이 필요합니다. (Supabase Auth Session 없음)");
+                throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해주세요.");
             }
 
-            // [중요] 입력값 공백 제거 헬퍼
+            // [중요] 입력값 전처리 (공백 제거)
             const getVal = (key: string) => (formCredentials[key] || '').trim();
 
-            // 3. 변수 매핑 (Frontend CamelCase -> DB SnakeCase)
+            // 4. 변수 매핑 (Frontend -> DB Column)
             let vendorId = '';
             let accessKey = '';
             let secretKey = '';
 
-            // 사용자가 입력한 formCredentials에서 값을 꺼내 매핑
             switch (selectedPlatform) {
                 case 'NAVER':
                     // 네이버: Client ID -> access_key, Client Secret -> secret_key
                     accessKey = getVal('clientId');
                     secretKey = getVal('clientSecret');
                     break;
+
                 case 'COUPANG':
                     // 쿠팡: Vendor ID -> vendor_id, Access Key -> access_key, Secret Key -> secret_key
                     vendorId = getVal('vendorId');
                     accessKey = getVal('accessKey');
                     secretKey = getVal('secretKey');
                     break;
+
                 case '11ST':
                     // 11번가: API Key -> access_key
                     accessKey = getVal('apiKey');
                     break;
+
                 case 'GMARKET':
                 case 'AUCTION':
                     // 지마켓/옥션: ID -> vendor_id, PW -> secret_key
                     vendorId = getVal('username');
                     secretKey = getVal('password');
                     break;
-                default:
-                    vendorId = getVal('vendorId') || getVal('username');
-                    accessKey = getVal('accessKey') || getVal('apiKey') || getVal('clientId');
-                    secretKey = getVal('secretKey') || getVal('clientSecret') || getVal('password');
+                
+                // default 케이스 제거: 매핑 오류 방지를 위해 명시적으로 처리
             }
 
-            console.log("Saving to DB...", { 
-                market: selectedPlatform, 
-                vendor_len: vendorId.length,
-                access_len: accessKey.length,
-                secret_len: secretKey.length
+            // [디버깅 로그] DB 전송 전 데이터 확인 (콘솔에서 확인 가능)
+            console.log("🚀 Attempting DB Insert:", {
+                user_id: user.id,
+                market: selectedPlatform,
+                vendor_id: vendorId,
+                access_key: accessKey,
+                // 보안상 전체 노출은 피하되 길이는 확인
+                secret_key_len: secretKey.length 
             });
 
-            // 4. Supabase DB Insert
-            const { error: insertError } = await supabase
+            // 5. DB Insert 실행
+            const { data, error: insertError } = await supabase
                 .from('market_accounts')
                 .insert([
                     {
-                        user_id: user.id,              // 로그인한 유저 ID
-                        market_type: selectedPlatform, // 마켓 타입
-                        account_name: formAlias.trim(),// 계정 별칭 공백 제거
+                        user_id: user.id,              // 1. 유저 ID
+                        market_type: selectedPlatform, // 마켓 종류
+                        account_name: formAlias.trim(),// 계정 별칭
                         is_active: true,
                         
-                        // [핵심] 매핑된 변수 적용
+                        // 2. 매핑된 컬럼값 주입
                         vendor_id: vendorId,      
                         access_key: accessKey,    
                         secret_key: secretKey    
                     }
-                ]);
+                ])
+                .select(); // Insert 결과 반환 요청
 
+            // 6. 에러 핸들링
             if (insertError) {
-                console.error("Supabase Insert Error:", insertError);
+                console.error("🔥 Supabase Insert Error:", insertError);
                 throw insertError;
             }
             
-            // 성공 시 처리
+            console.log("✅ Insert Success:", data);
+
             alert("✅ 계정이 성공적으로 저장되었습니다!");
             await loadAccounts(); // 목록 새로고침
             setIsModalOpen(false);
 
         } catch (error: any) {
-            console.error("🔥 Error Saving Account:", error);
-            // 에러 메시지를 좀 더 구체적으로 표시
+            console.error("❌ 저장 실패:", error);
+            // 사용자에게 에러 원인 구체적으로 알림
             const msg = error.message || error.error_description || "알 수 없는 오류";
-            alert(`저장 실패: ${msg}\n\n(콘솔 로그를 확인해주세요)`);
+            alert(`저장 실패: ${msg}\n\n(개발자 도구 콘솔을 확인해주세요)`);
         } finally {
             setModalLoading(false);
         }
