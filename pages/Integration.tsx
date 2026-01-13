@@ -128,7 +128,7 @@ const Integration = () => {
 
         try {
             // [Fix 1] Auto-Sanitization (Trim Whitespace)
-            // Fixes issues where copy-pasting from websites includes hidden chars or spaces
+            // 웹사이트에서 복사 시 딸려오는 공백문자 제거
             const sanitize = (val: string | undefined) => val ? val.trim() : "";
             
             const cleanAlias = sanitize(formAlias);
@@ -137,17 +137,16 @@ const Integration = () => {
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            // Sanitize and Validate required fields
+            // 필드 유효성 검사 및 정제
             currentMarket?.fields.forEach(field => {
                 const val = sanitize(formCredentials[field.key]);
                 if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
                 cleanCredentials[field.key] = val;
             });
 
-            // [Fix 2] Prepare Payload & ID Handling
-            // We do NOT include 'id' here. Supabase/Postgres will auto-generate a UUID.
-            // We pass 'cleanCredentials' (camelCase keys) directly because mockSupabase.ts 
-            // expects these specific keys (e.g., vendorId, accessKey) to map them to DB columns.
+            // [Fix 2] Payload 구성 및 ID 처리
+            // 'id' 필드를 포함하지 않아야 DB에서 UUID가 자동 생성됩니다.
+            // camelCase 키(vendorId 등)를 그대로 보냅니다. (backend/mockSupabase에서 DB 컬럼으로 매핑함)
             const newAccountPayload = {
                 marketType: selectedPlatform,
                 accountName: cleanAlias,
@@ -155,8 +154,8 @@ const Integration = () => {
                 isActive: true
             };
             
-            // [Fix 3] Secure Logging
-            // Create a masked copy for debugging to avoid exposing real API keys in console
+            // [Fix 3] 보안 로그 (Masking)
+            // 실제 키가 콘솔에 찍히지 않도록 마스킹 처리
             const maskedLog = {
                 ...newAccountPayload,
                 credentials: { ...cleanCredentials }
@@ -164,28 +163,28 @@ const Integration = () => {
             Object.keys(maskedLog.credentials).forEach(k => {
                 maskedLog.credentials[k] = '********';
             });
-            console.log("🚀 [Saving Account] Payload (Masked):", maskedLog);
+            console.log("🚀 [Account Save Request]", maskedLog);
 
-            // 4. Save via Mock/DB Adapter
-            // Casting to 'any' to avoid TS error about missing 'id', since DB generates it.
+            // 4. 저장 요청
+            // 타입 캐스팅: MarketAccount에는 id가 필수지만, 저장 시엔 없어도 되므로(DB생성) 캐스팅으로 TS 에러 우회
             const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
             
             if (!result.success) {
                 throw new Error(result.message || "저장에 실패했습니다.");
             }
 
-            alert("✅ 계정이 성공적으로 저장되었습니다!");
+            alert("✅ 계정이 성공적으로 연동되었습니다!");
             await loadAccounts();
             setIsModalOpen(false);
 
         } catch (error: any) {
             console.error("🔥 Save Error:", error);
             
-            // [Fix 4] Detailed Error Handling
+            // [Fix 4] 상세 에러 메시지 표시
             const rawError = JSON.stringify(error, null, 2);
             const message = error.message || error.error_description || "알 수 없는 오류";
             
-            alert(`❌ 저장 실패 (이 내용을 알려주세요)\n\n메시지: ${message}\n\n상세내용:\n${rawError}`);
+            alert(`❌ 연동 실패\n\n${message}\n\n(상세 내용이 콘솔에 기록되었습니다)`);
         } finally {
             setModalLoading(false);
         }
