@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
-import { saveSupabaseConfig, clearSupabaseConfig, isSupabaseConfigured } from '../lib/supabase';
-import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store } from 'lucide-react';
+import { supabase, saveSupabaseConfig, clearSupabaseConfig, isSupabaseConfigured } from '../lib/supabase';
+import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
     platform: Platform;
@@ -33,7 +34,6 @@ const MARKETS: MarketInfo[] = [
         color: 'bg-red-500', 
         description: '쿠팡 Wing 판매자 센터 > 판매자 정보 > 추가판매정보 > 오픈API 키 발급에서 확인하세요.',
         fields: [
-            // [수정] 순서 변경: Vendor ID -> Access Key -> Secret Key
             { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00...' },
             { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
             { key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: '쿠팡 API Secret Key' },
@@ -74,6 +74,7 @@ const MARKETS: MarketInfo[] = [
 ];
 
 const Integration = () => {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<string>('MARKET'); // MARKET | DATABASE
     const [selectedPlatform, setSelectedPlatform] = useState<Platform>('NAVER');
     const [myAccounts, setMyAccounts] = useState<MarketAccount[]>([]);
@@ -88,10 +89,19 @@ const Integration = () => {
     const [dbUrl, setDbUrl] = useState(localStorage.getItem('sb_url') || '');
     const [dbKey, setDbKey] = useState(localStorage.getItem('sb_key') || '');
     const [isDbConnected, setIsDbConnected] = useState(isSupabaseConfigured());
+    const [dbAuthUser, setDbAuthUser] = useState<any>(null);
 
     useEffect(() => {
         loadAccounts();
+        checkDbAuth();
     }, []);
+
+    const checkDbAuth = async () => {
+        if (supabase) {
+            const { data } = await supabase.auth.getUser();
+            setDbAuthUser(data.user);
+        }
+    };
 
     const loadAccounts = async () => {
         try {
@@ -115,7 +125,6 @@ const Integration = () => {
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        // Validation
         const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
         if (!formAlias) return alert("계정 별칭을 입력해주세요.");
         for (const field of currentMarket!.fields) {
@@ -125,36 +134,40 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // [중요] DB에 보낼 데이터 구성
             const newAccount = {
-                id: Math.random().toString(36).substr(2, 9), // DB에서는 무시됨(auto gen)
+                id: Math.random().toString(36).substr(2, 9), 
                 marketType: selectedPlatform,
                 accountName: formAlias,
-                credentials: formCredentials, // API 키값들
+                credentials: formCredentials, 
                 isActive: true
             };
             
-            console.log('🚀 [Integration] Saving Account to DB:', newAccount);
-
-            // 실제 저장 호출 (mockSupabase 내부에서 Snake_case 매핑 및 Supabase Insert 수행)
-            await mockSupabase.db.markets.save(newAccount);
+            // 저장 호출
+            const result = await mockSupabase.db.markets.save(newAccount);
             
-            console.log('✅ [Integration] Save Success');
             await loadAccounts();
             setIsModalOpen(false);
-            alert("계정이 성공적으로 연동되었습니다.");
+            
+            if (result.mode === 'LOCAL') {
+                if (isDbConnected && !dbAuthUser) {
+                    alert(`[주의] DB 연결은 되어있으나, Supabase 로그인이 되어있지 않습니다.\n\n로컬 데모 계정은 DB에 저장할 수 없어 브라우저에만 저장되었습니다.\n실제 DB 저장을 원하시면 로그아웃 후 '회원가입'을 통해 Supabase 계정을 생성하세요.`);
+                } else {
+                    alert(`[알림] ${result.message}\n계정 정보는 브라우저에 안전하게 저장되었습니다.`);
+                }
+            } else {
+                alert("✅ DB에 성공적으로 저장되었습니다!");
+            }
+
         } catch (error: any) {
-            console.error("🔥 [Integration] Save Failed:", error);
-            // 에러 메시지 사용자에게 노출
-            alert(`저장에 실패했습니다.\n오류: ${error.message || error}`);
+            console.error("🔥 Error:", error);
+            alert(`오류가 발생했습니다: ${error.message}`);
         } finally {
-            // [필수] 성공/실패 여부와 상관없이 로딩 스피너 종료
             setModalLoading(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if(confirm('정말 이 계정을 삭제하시겠습니까? 수집된 주문 데이터는 보존되지만 연동이 끊어집니다.')) {
+        if(confirm('정말 이 계정을 삭제하시겠습니까?')) {
             await mockSupabase.db.markets.delete(id);
             await loadAccounts();
         }
@@ -249,27 +262,49 @@ const Integration = () => {
                                 </div>
                             </div>
 
+                            {/* Status Panel */}
                             {isDbConnected ? (
-                                <div className="bg-green-50 border border-green-100 rounded-2xl p-6 flex items-center justify-between mb-8">
-                                    <div className="flex items-center gap-4">
-                                        <div className="bg-green-500 text-white p-2 rounded-full shadow-lg shadow-green-200"><Check size={20}/></div>
-                                        <div>
-                                            <p className="font-bold text-green-800 text-lg">연결됨</p>
-                                            <p className="text-sm text-green-600">주문 데이터가 실제 DB와 동기화되고 있습니다.</p>
+                                <div className="bg-green-50 border border-green-100 rounded-2xl p-6 mb-8">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-green-500 text-white p-1.5 rounded-full"><Check size={16}/></div>
+                                            <span className="font-bold text-green-800">DB 연결 성공</span>
                                         </div>
+                                        <button onClick={handleDisconnectDb} className="text-xs text-green-600 hover:text-green-800 underline">연결 해제</button>
                                     </div>
-                                    <button onClick={handleDisconnectDb} className="bg-white border border-green-200 text-green-700 px-4 py-2 rounded-xl font-bold hover:bg-green-100 transition-colors shadow-sm">
-                                        연결 해제
-                                    </button>
+                                    
+                                    <div className="bg-white/60 rounded-xl p-4 text-sm space-y-2">
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Project URL</span>
+                                            <span className="font-mono text-slate-700">{dbUrl.split('.')[0]}...</span>
+                                        </div>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-slate-500">인증 상태</span>
+                                            {dbAuthUser ? (
+                                                <span className="text-green-600 font-bold flex items-center gap-1">
+                                                    <Check size={12}/> 인증됨 ({dbAuthUser.email})
+                                                </span>
+                                            ) : (
+                                                <span className="text-amber-600 font-bold flex items-center gap-1">
+                                                    <AlertCircle size={12}/> 미인증 (Guest)
+                                                </span>
+                                            )}
+                                        </div>
+                                        {!dbAuthUser && (
+                                            <div className="mt-2 text-xs text-amber-700 bg-amber-100/50 p-2 rounded">
+                                                주의: 현재 로컬 데모 계정으로 로그인되어 있습니다.<br/>DB에 데이터를 저장하려면 Supabase에 등록된 계정으로 로그인해야 합니다.
+                                                <button onClick={() => { mockSupabase.auth.signOut(); navigate('/login'); }} className="ml-2 underline font-bold">로그인 하러 가기</button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             ) : (
-                                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-6 flex items-start gap-4 mb-8">
-                                    <AlertCircle size={24} className="text-amber-600 shrink-0 mt-1"/>
+                                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex items-start gap-4 mb-8">
+                                    <AlertCircle size={24} className="text-slate-400 shrink-0 mt-1"/>
                                     <div>
-                                        <p className="font-bold text-amber-800">데모 모드 실행 중</p>
-                                        <p className="text-sm text-amber-700 leading-relaxed mt-1">
-                                            현재 로컬 브라우저 저장소를 사용 중입니다. (새로고침 시 유지)<br/>
-                                            팀원과 데이터를 공유하거나 실제 운영을 하려면 Supabase 연결이 필요합니다.
+                                        <p className="font-bold text-slate-700">연결되지 않음</p>
+                                        <p className="text-sm text-slate-500 mt-1">
+                                            URL과 API Key를 입력하여 연결하세요.
                                         </p>
                                     </div>
                                 </div>

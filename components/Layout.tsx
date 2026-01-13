@@ -145,7 +145,7 @@ const Header = ({ title }: { title: string }) => {
 
   const checkStatus = () => {
     const status = mockSupabase.getConnectionStatus();
-    setDbStatus(status === 'UNKNOWN' ? 'DISCONNECTED' : status);
+    setDbStatus(status);
   };
 
   return (
