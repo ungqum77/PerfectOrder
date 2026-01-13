@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, saveSupabaseConfig, clearSupabaseConfig, isSupabaseConfigured } from '../lib/supabase';
-import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -73,6 +73,39 @@ const MARKETS: MarketInfo[] = [
     },
 ];
 
+// 디버깅 헬퍼 함수: 입력된 문자열의 상세 정보를 분석
+const analyzeInput = (input: string | undefined) => {
+    if (!input) return "값 없음 (Empty)";
+    const length = input.length;
+    
+    // 각 문자의 아스키/유니코드 번호를 추출
+    const charAnalysis = input.split('').map((char, index) => {
+        const code = char.charCodeAt(0);
+        // 일반적인 출력 가능 문자 범위(32~126)가 아니면 빨간색 표시 필요
+        const isStandard = code >= 32 && code <= 126;
+        return { char, code, isStandard };
+    });
+
+    return (
+        <div className="mt-1 p-2 bg-slate-800 text-green-400 rounded text-xs font-mono overflow-x-auto">
+            <div className="flex gap-4 border-b border-slate-600 pb-1 mb-1">
+                <span>Length: {length}</span>
+                <span>Type: {typeof input}</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+                {charAnalysis.map((item, idx) => (
+                    <span key={idx} className={`px-1 rounded ${item.isStandard ? 'bg-slate-700' : 'bg-red-600 text-white font-bold'}`}>
+                        {item.char}({item.code})
+                    </span>
+                ))}
+            </div>
+            {!charAnalysis.every(c => c.isStandard) && (
+                <div className="mt-1 text-red-300 font-bold">⚠️ 특수/숨겨진 문자가 포함되어 있습니다!</div>
+            )}
+        </div>
+    );
+};
+
 const Integration = () => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<string>('MARKET'); // MARKET | DATABASE
@@ -127,15 +160,19 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // [Fix 1] 강력한 공백 제거 (Strong Sanitization)
-            // .trim()만으로는 웹사이트 표에서 복사한 탭(\t), 줄바꿈(\n), 특수 공백(\u00A0) 등이 제거되지 않을 수 있습니다.
-            // 따라서 모든 공백 문자를 빈 문자열로 치환합니다. (API Key에는 공백이 없어야 함)
+            // [Fix] 초강력 정제 (Super Sanitization)
+            // 1. .trim()으로 앞뒤 공백 제거
+            // 2. .replace(/\s/g, '')로 내부 공백 제거
+            // 3. .replace(/[^\x20-\x7E]/g, '')로 ASCII 범위를 벗어나는 모든 문자(한글, 특수문자, 숨김문자 등) 제거
+            // API Key는 보통 영문+숫자+특수기호(ASCII)로만 구성되므로 이 방법이 가장 안전합니다.
             const sanitizeKey = (val: string | undefined) => {
                 if (!val) return "";
-                return val.replace(/\s+/g, ''); // 모든 공백 제거
+                let clean = val.trim();
+                clean = clean.replace(/\s+/g, ''); // 모든 공백 제거
+                clean = clean.replace(/[^\x20-\x7E]/g, ''); // 비-ASCII 문자 제거 (숨겨진 유니코드 제거)
+                return clean;
             };
 
-            // 이름(별칭)은 중간 공백 허용하되 앞뒤 공백만 제거
             const sanitizeName = (val: string | undefined) => val ? val.trim() : "";
             
             const cleanAlias = sanitizeName(formAlias);
@@ -144,17 +181,15 @@ const Integration = () => {
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            // 필드 검증 및 정제
             currentMarket?.fields.forEach(field => {
                 const rawVal = formCredentials[field.key];
-                const val = sanitizeKey(rawVal); // 여기서 강력하게 공백 제거
+                const val = sanitizeKey(rawVal);
                 
                 if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
                 cleanCredentials[field.key] = val;
             });
 
-            // [Fix 2] ID 문제 해결
-            // DB 저장 시 id가 ''(빈 문자열)로 가면 UUID 에러가 발생하므로 id 필드 자체를 생략합니다.
+            // ID 제외 (DB 자동생성)
             const newAccountPayload = {
                 marketType: selectedPlatform,
                 accountName: cleanAlias,
@@ -162,17 +197,15 @@ const Integration = () => {
                 isActive: true
             };
             
-            // 디버깅용 로그 (키 마스킹 처리)
             const maskedLog = {
                 ...newAccountPayload,
                 credentials: { ...cleanCredentials }
             };
             Object.keys(maskedLog.credentials).forEach(k => {
-                maskedLog.credentials[k] = '********'; // 보안상 로그에 키 노출 방지
+                maskedLog.credentials[k] = '********';
             });
             console.log("🚀 [Account Save Request]", maskedLog);
 
-            // 저장 요청 (id 생략된 상태로 전달 -> DB가 생성)
             const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
             
             if (!result.success) {
@@ -489,6 +522,8 @@ const Integration = () => {
                                         placeholder={field.placeholder}
                                         className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none font-mono text-sm bg-slate-50 transition-all"
                                     />
+                                    {/* Debug Visualizer */}
+                                    {analyzeInput(formCredentials[field.key])}
                                 </div>
                             ))}
 
