@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 <<<<<<< HEAD
 const YOUR_SUPABASE_URL = "https://oknypcjubolxtlgudhvh.supabase.co"; 
 =======
-const YOUR_SUPABASE_URL = "https://oknypcjubolxtlgudhvh.supabase.co";
+
 >>>>>>> d8ebf0176e953e464a0d299f1d53036af4f3e61c
 const YOUR_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rbnlwY2p1Ym9seHRsZ3VkaHZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMDQxODEsImV4cCI6MjA4Mzc4MDE4MX0.EIo1IqFpswKLi0SfHbD1U2_Vi3G5ygwaJ6t5PmhQwyQ";
 
