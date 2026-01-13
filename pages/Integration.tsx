@@ -118,23 +118,28 @@ const Integration = () => {
         }
 
         setModalLoading(true);
+
         try {
-            // [수정됨] 별도 검증 없이 즉시 DB에 저장 (CORS 이슈 방지)
-            await mockSupabase.db.markets.save({
-                id: Math.random().toString(36).substr(2, 9),
+            // 디버깅용 로그: 전송하려는 데이터 확인
+            const newAccount = {
+                id: Math.random().toString(36).substr(2, 9), // DB에서는 무시됨(auto gen)
                 marketType: selectedPlatform,
                 accountName: formAlias,
                 credentials: formCredentials,
                 isActive: true
-            });
+            };
+            console.log('🚀 [Integration] Saving Account:', newAccount);
+
+            await mockSupabase.db.markets.save(newAccount);
+            
             await loadAccounts();
             setIsModalOpen(false);
-            alert("계정이 추가되었습니다.");
-        } catch (error) {
-            console.error(error);
-            alert("계정 저장 중 오류가 발생했습니다.");
+            alert("계정이 성공적으로 연동되었습니다.");
+        } catch (error: any) {
+            console.error("🔥 [Integration] Save Failed:", error);
+            alert(`저장에 실패했습니다.\n오류: ${error.message || error}`);
         } finally {
-            // 성공하든 실패하든 로딩 종료
+            // 성공하든 실패하든 로딩 상태 해제 (무한 로딩 방지)
             setModalLoading(false);
         }
     };

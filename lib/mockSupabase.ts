@@ -5,7 +5,7 @@ import { supabase, isSupabaseConfigured } from './supabase';
 const STORAGE_KEYS = {
   USERS: 'po_users',
   SESSION: 'po_session',
-  MARKET_ACCOUNTS: 'po_market_accounts', // 키 변경
+  MARKET_ACCOUNTS: 'po_market_accounts',
   ORDERS: 'po_orders' 
 };
 
@@ -178,24 +178,42 @@ export const mockSupabase = {
         return usersStr ? JSON.parse(usersStr) : [];
       }
     },
-    // 변경된 marketAccounts 로직
     markets: {
         save: async (account: MarketAccount) => {
             if (isSupabaseConfigured() && supabase) {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    await supabase.from('market_accounts').insert({
-                        user_id: user.id,
-                        market_type: account.marketType,
-                        account_name: account.accountName,
-                        credentials: account.credentials,
-                        is_active: account.isActive
-                    });
+                // 1. 현재 사용자 확인
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                if (authError || !user) throw new Error("사용자 인증 정보가 없습니다.");
+
+                // 2. DB 스키마에 맞춰 데이터 매핑 (credentials 객체 -> Flat Columns)
+                // Access Key Mapping: accessKey, apiKey, clientId
+                const accessKey = account.credentials.accessKey || account.credentials.apiKey || account.credentials.clientId;
+                // Secret Key Mapping: secretKey, clientSecret, password
+                const secretKey = account.credentials.secretKey || account.credentials.clientSecret || account.credentials.password;
+                // Vendor ID Mapping: vendorId, username
+                const vendorId = account.credentials.vendorId || account.credentials.username;
+
+                // 3. Snake Case로 변환하여 Insert
+                const { error } = await supabase.from('market_accounts').insert({
+                    user_id: user.id,
+                    market_type: account.marketType,
+                    account_name: account.accountName,
+                    is_active: account.isActive,
+                    // Flat Columns
+                    access_key: accessKey,
+                    secret_key: secretKey,
+                    vendor_id: vendorId,
+                    // market_accounts 테이블에 credentials 컬럼이 없다면 제외해야 함
+                });
+
+                if (error) {
+                    console.error("Supabase Insert Error:", error);
+                    throw error; // 에러를 호출자에게 전파
                 }
                 return;
             }
 
-            // Local Mock
+            // Local Mock 저장 로직
             const allStr = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
             let all: MarketAccount[] = allStr ? JSON.parse(allStr) : [];
             all.push(account);
@@ -214,8 +232,35 @@ export const mockSupabase = {
         },
         get: async (): Promise<MarketAccount[]> => {
             if (isSupabaseConfigured() && supabase) {
-                const { data } = await supabase.from('market_accounts').select('*');
-                if (data) return toCamelCase(data); // DB snake_case -> app camelCase
+                const { data, error } = await supabase.from('market_accounts').select('*');
+                if (error) {
+                    console.error("Supabase Select Error:", error);
+                    return [];
+                }
+                
+                // DB의 Flat Columns를 앱의 MarketAccount 타입으로 변환
+                if (data) {
+                    return data.map((item: any) => ({
+                        id: item.id,
+                        marketType: item.market_type,
+                        accountName: item.account_name,
+                        isActive: item.is_active,
+                        createdAt: item.created_at,
+                        // credentials 객체 재구성
+                        credentials: {
+                            accessKey: item.access_key,
+                            apiKey: item.access_key,     // alias
+                            clientId: item.access_key,   // alias
+                            
+                            secretKey: item.secret_key,
+                            clientSecret: item.secret_key, // alias
+                            password: item.secret_key,     // alias
+
+                            vendorId: item.vendor_id,
+                            username: item.vendor_id       // alias
+                        }
+                    }));
+                }
                 return [];
             }
             const str = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
