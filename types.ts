@@ -1,3 +1,4 @@
+
 export type OrderStatus = 'NEW' | 'PENDING' | 'SHIPPING' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
 
 export type Platform = 'NAVER' | 'COUPANG' | '11ST' | 'GMARKET' | 'AUCTION';
@@ -17,16 +18,18 @@ export interface User {
   isVerified?: boolean; // 이메일 인증 여부
 }
 
-export interface MarketCredential {
+// 변경된 DB 스키마에 맞춘 인터페이스
+export interface MarketAccount {
   id: string;
-  platform: Platform;
-  type: 'LOGIN' | 'API_KEY';
-  alias: string; // User defined name (e.g., "Store A", "Main Store")
-  isConnected: boolean;
-  username?: string;
-  apiKey?: string;
-  apiSecret?: string; // Added for Naver/Coupang secrets
+  marketType: Platform;
+  accountName: string; // 별칭 (예: 쿠팡 1호점)
+  credentials: Record<string, string>; // jsonb 대응 (apiKey, secretKey 등 유동적)
+  isActive: boolean;
+  createdAt?: string;
 }
+
+// 기존 코드 호환성을 위해 alias (Deprecated 예정)
+export type MarketCredential = MarketAccount;
 
 export interface Order {
   id: string;

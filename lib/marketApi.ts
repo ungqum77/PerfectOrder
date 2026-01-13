@@ -1,36 +1,35 @@
 import { supabase } from './supabase';
-import { Order, MarketCredential } from '../types';
+import { Order, MarketAccount, OrderStatus } from '../types';
 
 /**
- * 네이버 커머스 API는 브라우저에서 직접 호출할 수 없습니다 (CORS 문제).
- * 따라서 Supabase Edge Function을 통해 우회 호출해야 합니다.
- * 이 파일은 프론트엔드에서 Edge Function을 호출하는 로직입니다.
+ * [주의] 마켓 API 연동 시 CORS 정책 참고
+ * 
+ * 네이버, 쿠팡 등의 오픈 API는 보안상의 이유로 브라우저(프론트엔드)에서 직접 호출하는 것을 차단(CORS)하는 경우가 많습니다.
+ * 따라서 아래 로직은 원칙적으로 Supabase Edge Function이나 백엔드 서버에서 실행되어야 합니다.
+ * 
+ * 이 파일에는 사용자가 요청한 'HMAC 서명 생성'과 'API 호출 로직'을 구현해 두었으며,
+ * 실제 환경에서는 이 코드를 복사하여 Supabase Edge Function('fetch-coupang-orders')에 배포 후
+ * client에서는 supabase.functions.invoke()를 사용하는 것이 정석입니다.
  */
 
 export const marketApi = {
     /**
-     * 네이버 주문 수집 (Supabase Edge Function 'fetch-naver-orders' 호출)
+     * 네이버 주문 수집 (Supabase Edge Function 호출 방식)
      */
-    fetchNaverOrders: async (credential: MarketCredential): Promise<Order[]> => {
-        if (!supabase) {
-            console.error("Supabase client not initialized");
-            return [];
-        }
+    fetchNaverOrders: async (credential: MarketAccount): Promise<Order[]> => {
+        if (!supabase) return [];
 
         try {
-            // Edge Function 호출
-            // 실제 구현 시에는 Supabase 프로젝트에 'fetch-naver-orders'라는 Edge Function을 배포해야 합니다.
+            // Edge Function 호출 예시
             const { data, error } = await supabase.functions.invoke('fetch-naver-orders', {
                 body: {
-                    clientId: credential.apiKey, // Naver Application ID
-                    clientSecret: credential.apiSecret, // Naver Application Secret
+                    clientId: credential.credentials?.clientId,
+                    clientSecret: credential.credentials?.clientSecret,
                 }
             });
 
             if (error) throw error;
 
-            // 네이버 데이터 형식을 우리 앱의 Order 형식으로 변환
-            // (Edge Function에서 변환해서 줄 수도 있고, 여기서 할 수도 있습니다)
             return data.map((item: any) => ({
                 id: `N-${item.productOrderId}`,
                 platform: 'NAVER',
@@ -44,10 +43,64 @@ export const marketApi = {
                 courier: '',
                 invoiceNumber: ''
             }));
+        } catch (e) {
+            console.error("Naver API Error:", e);
+            return [];
+        }
+    },
+
+    /**
+     * 쿠팡 주문 수집 (Proxy API 사용)
+     * Vercel Serverless Function (/api/coupang/fetch-orders)을 통해 호출
+     */
+    fetchCoupangOrders: async (credential: MarketAccount): Promise<Order[]> => {
+        const { accessKey, secretKey, vendorId } = credential.credentials;
+        
+        if (!accessKey || !secretKey || !vendorId) {
+            console.error("쿠팡 인증 정보가 부족합니다.");
+            return [];
+        }
+
+        try {
+            // CORS 우회를 위해 백엔드 프록시 호출
+            const response = await fetch('/api/coupang/fetch-orders', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    vendorId,
+                    accessKey,
+                    secretKey
+                })
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Coupang Proxy Error (${response.status}): ${errText}`);
+            }
+
+            const json = await response.json();
+
+            // 5. 데이터 매핑 (Coupang Response -> App Order)
+            if (!json.data) return [];
+
+            return json.data.map((item: any) => ({
+                id: `C-${item.orderId}`, // 쿠팡은 shipmentBoxId 등을 ID로 쓰기도 함
+                platform: 'COUPANG',
+                orderNumber: String(item.orderId),
+                productName: item.vendorItemName || item.itemName,
+                option: item.vendorItemPackageName || '단품',
+                customerName: item.orderer?.name || '구매자',
+                date: item.orderedAt ? item.orderedAt.split('T')[0] : new Date().toISOString().split('T')[0],
+                status: 'NEW', // ACCEPT 상태만 가져왔으므로 NEW
+                amount: item.orderPrice || 0,
+                courier: '',
+                invoiceNumber: ''
+            }));
 
         } catch (e) {
-            console.error("Failed to fetch Naver orders:", e);
-            // 에러 발생 시 빈 배열 반환 혹은 에러 처리
+            console.error("Coupang API Error:", e);
             return [];
         }
     },
@@ -55,25 +108,27 @@ export const marketApi = {
     /**
      * 모든 연동된 마켓의 주문을 동기화
      */
-    syncAllMarkets: async (credentials: MarketCredential[]) => {
+    syncAllMarkets: async (credentials: MarketAccount[]) => {
         let allOrders: Order[] = [];
         
         for (const cred of credentials) {
-            if (!cred.isConnected) continue;
+            if (!cred.isActive) continue;
 
-            if (cred.platform === 'NAVER') {
+            if (cred.marketType === 'NAVER') {
                 const orders = await marketApi.fetchNaverOrders(cred);
                 allOrders = [...allOrders, ...orders];
+            } else if (cred.marketType === 'COUPANG') {
+                const orders = await marketApi.fetchCoupangOrders(cred);
+                allOrders = [...allOrders, ...orders];
             }
-            // 쿠팡, 11번가 등 추가 구현 필요
         }
         
         return allOrders;
     }
 };
 
-// 네이버 상태 코드를 우리 앱 상태 코드로 매핑
-function mapNaverStatus(naverStatus: string): any {
+// 네이버 상태 매핑 헬퍼
+function mapNaverStatus(naverStatus: string): OrderStatus {
     switch (naverStatus) {
         case 'PAYED': return 'NEW';
         case 'PRODUCT_PREPARE': return 'PENDING';

@@ -1,11 +1,11 @@
-import { User, UserRole, PlanType, MarketCredential, Order, OrderStatus } from '../types';
+import { User, UserRole, PlanType, MarketAccount, Order, OrderStatus } from '../types';
 import { MOCK_ORDERS } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabase';
 
 const STORAGE_KEYS = {
   USERS: 'po_users',
   SESSION: 'po_session',
-  MARKETS: 'po_markets',
+  MARKET_ACCOUNTS: 'po_market_accounts', // 키 변경
   ORDERS: 'po_orders' 
 };
 
@@ -41,11 +41,7 @@ export const mockSupabase = {
   getConnectionStatus: () => connectionStatus,
 
   auth: {
-    // ----------------------------------------------------------------
-    // [Sign Up] 회원가입
-    // ----------------------------------------------------------------
     signUp: async (email: string, password: string, name: string): Promise<{ user: User | null, error: string | null }> => {
-      // 1. 실제 Supabase가 연결되어 있는 경우
       if (isSupabaseConfigured() && supabase) {
         try {
           const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -56,13 +52,11 @@ export const mockSupabase = {
               emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined
             }
           });
-
           if (authError) return { user: null, error: authError.message };
           if (!authData.user) return { user: null, error: "회원가입에 실패했습니다." };
 
           const now = new Date();
           const trialEndsAt = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString();
-
           const user: User = {
             id: authData.user.id,
             email,
@@ -73,25 +67,16 @@ export const mockSupabase = {
             trialEndsAt: trialEndsAt,
             isVerified: false
           };
-
           return { user, error: null };
-
-        } catch (e: any) {
-          return { user: null, error: e.message };
-        }
+        } catch (e: any) { return { user: null, error: e.message }; }
       }
 
-      // 2. Mock Mode
+      // Mock Mode
       const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
       const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-
-      if (users.find(u => u.email === email)) {
-        return { user: null, error: "이미 존재하는 이메일입니다." };
-      }
+      if (users.find(u => u.email === email)) return { user: null, error: "이미 존재하는 이메일입니다." };
 
       const now = new Date();
-      const trialEndsAt = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString();
-
       const newUser: User = {
         id: Math.random().toString(36).substr(2, 9),
         email,
@@ -99,49 +84,26 @@ export const mockSupabase = {
         role: email.includes('admin') ? 'ADMIN' : 'USER',
         plan: 'FREE',
         joinedAt: now.toISOString(),
-        trialEndsAt: trialEndsAt,
+        trialEndsAt: new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString(),
         isVerified: false 
       };
-
       users.push(newUser);
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
       localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(newUser));
-
       return { user: newUser, error: null };
     },
 
-    // ----------------------------------------------------------------
-    // [Sign In] 로그인
-    // ----------------------------------------------------------------
     signIn: async (email: string, password: string): Promise<{ user: User | null, error: string | null }> => {
-      // 1. 실제 Supabase
       if (isSupabaseConfigured() && supabase) {
         try {
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
-            password
-          });
-
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
           if (authError) return { user: null, error: authError.message };
           if (!authData.user) return { user: null, error: "로그인에 실패했습니다." };
+          if (!authData.user.email_confirmed_at) return { user: null, error: "이메일 인증이 완료되지 않았습니다." };
 
-          if (!authData.user.email_confirmed_at) {
-             return { user: null, error: "이메일 인증이 완료되지 않았습니다." };
-          }
-
-          const { data: dbUser, error: dbError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', authData.user.id)
-            .single();
-
-          if (dbError || !dbUser) {
-             return { user: null, error: "회원 정보가 생성되지 않았습니다." };
-          }
-
-          if (dbUser.is_verified === false) {
-             await supabase.from('users').update({ is_verified: true }).eq('id', authData.user.id);
-          }
+          const { data: dbUser, error: dbError } = await supabase.from('users').select('*').eq('id', authData.user.id).single();
+          if (dbError || !dbUser) return { user: null, error: "회원 정보가 생성되지 않았습니다." };
+          if (dbUser.is_verified === false) await supabase.from('users').update({ is_verified: true }).eq('id', authData.user.id);
 
           const user: User = {
             id: dbUser.id,
@@ -154,39 +116,24 @@ export const mockSupabase = {
             subscriptionEndsAt: dbUser.subscription_ends_at,
             isVerified: true
           };
-
           return { user, error: null };
-
-        } catch (e: any) {
-          return { user: null, error: e.message };
-        }
+        } catch (e: any) { return { user: null, error: e.message }; }
       }
 
-      // 2. Mock Mode
       const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
       const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-      
       const user = users.find(u => u.email === email);
-      
-      if (!user) {
-        return { user: null, error: "사용자를 찾을 수 없습니다." };
-      }
-
+      if (!user) return { user: null, error: "사용자를 찾을 수 없습니다." };
       localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(user));
       return { user, error: null };
     },
 
-    // ----------------------------------------------------------------
-    // [Resend Email] 인증 메일 재발송 (신규 추가)
-    // ----------------------------------------------------------------
     resendEmail: async (email: string): Promise<string | null> => {
         if (isSupabaseConfigured() && supabase) {
             const { error } = await supabase.auth.resend({
                 type: 'signup',
                 email: email,
-                options: {
-                    emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined
-                }
+                options: { emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined }
             });
             return error ? error.message : null;
         }
@@ -194,9 +141,7 @@ export const mockSupabase = {
     },
 
     signOut: async () => {
-      if (isSupabaseConfigured() && supabase) {
-        await supabase.auth.signOut();
-      }
+      if (isSupabaseConfigured() && supabase) await supabase.auth.signOut();
       localStorage.removeItem(STORAGE_KEYS.SESSION);
     },
 
@@ -213,7 +158,6 @@ export const mockSupabase = {
             const snakeUpdates = toSnakeCase(updates);
             await supabase.from('users').update(snakeUpdates).eq('id', userId);
         }
-
         const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
         let users: User[] = usersStr ? JSON.parse(usersStr) : [];
         users = users.map(u => u.id === userId ? { ...u, ...updates } : u);
@@ -222,9 +166,7 @@ export const mockSupabase = {
         const session = localStorage.getItem(STORAGE_KEYS.SESSION);
         if (session) {
             const current = JSON.parse(session);
-            if (current.id === userId) {
-                 localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ ...current, ...updates }));
-            }
+            if (current.id === userId) localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify({ ...current, ...updates }));
         }
       },
       getAll: async (): Promise<User[]> => {
@@ -236,21 +178,47 @@ export const mockSupabase = {
         return usersStr ? JSON.parse(usersStr) : [];
       }
     },
+    // 변경된 marketAccounts 로직
     markets: {
-        save: async (credentials: MarketCredential) => {
-            const allMarketsStr = localStorage.getItem(STORAGE_KEYS.MARKETS);
-            let allMarkets: MarketCredential[] = allMarketsStr ? JSON.parse(allMarketsStr) : [];
-            allMarkets.push(credentials);
-            localStorage.setItem(STORAGE_KEYS.MARKETS, JSON.stringify(allMarkets));
+        save: async (account: MarketAccount) => {
+            if (isSupabaseConfigured() && supabase) {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    await supabase.from('market_accounts').insert({
+                        user_id: user.id,
+                        market_type: account.marketType,
+                        account_name: account.accountName,
+                        credentials: account.credentials,
+                        is_active: account.isActive
+                    });
+                }
+                return;
+            }
+
+            // Local Mock
+            const allStr = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
+            let all: MarketAccount[] = allStr ? JSON.parse(allStr) : [];
+            all.push(account);
+            localStorage.setItem(STORAGE_KEYS.MARKET_ACCOUNTS, JSON.stringify(all));
         },
         delete: async (id: string) => {
-            const allMarketsStr = localStorage.getItem(STORAGE_KEYS.MARKETS);
-            let allMarkets: MarketCredential[] = allMarketsStr ? JSON.parse(allMarketsStr) : [];
-            allMarkets = allMarkets.filter(m => m.id !== id);
-            localStorage.setItem(STORAGE_KEYS.MARKETS, JSON.stringify(allMarkets));
+            if (isSupabaseConfigured() && supabase) {
+                await supabase.from('market_accounts').delete().eq('id', id);
+                return;
+            }
+
+            const allStr = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
+            let all: MarketAccount[] = allStr ? JSON.parse(allStr) : [];
+            all = all.filter(m => m.id !== id);
+            localStorage.setItem(STORAGE_KEYS.MARKET_ACCOUNTS, JSON.stringify(all));
         },
-        get: async (): Promise<MarketCredential[]> => {
-            const str = localStorage.getItem(STORAGE_KEYS.MARKETS);
+        get: async (): Promise<MarketAccount[]> => {
+            if (isSupabaseConfigured() && supabase) {
+                const { data } = await supabase.from('market_accounts').select('*');
+                if (data) return toCamelCase(data); // DB snake_case -> app camelCase
+                return [];
+            }
+            const str = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
             return str ? JSON.parse(str) : [];
         }
     },
@@ -264,7 +232,6 @@ export const mockSupabase = {
             if (isSupabaseConfigured() && supabase) {
                 try {
                     const { data, error } = await supabase.from('orders').select('*');
-                    
                     if (error) {
                         connectionStatus = 'DISCONNECTED';
                     } else if (data) {
@@ -294,21 +261,13 @@ export const mockSupabase = {
         updateStatus: async (orderIds: string[], newStatus: OrderStatus) => {
             if (isSupabaseConfigured() && supabase) {
                 try {
-                    await supabase
-                        .from('orders')
-                        .update({ status: newStatus })
-                        .in('id', orderIds);
+                    await supabase.from('orders').update({ status: newStatus }).in('id', orderIds);
                     connectionStatus = 'CONNECTED';
-                } catch(e) {
-                    console.error(e);
-                }
+                } catch(e) { console.error(e); }
             }
-
             const str = localStorage.getItem(STORAGE_KEYS.ORDERS);
             let orders: Order[] = str ? JSON.parse(str) : MOCK_ORDERS;
-            orders = orders.map(order => 
-                orderIds.includes(order.id) ? { ...order, status: newStatus } : order
-            );
+            orders = orders.map(order => orderIds.includes(order.id) ? { ...order, status: newStatus } : order);
             localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
         }
     }
