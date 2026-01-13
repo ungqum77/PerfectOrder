@@ -181,6 +181,8 @@ export const mockSupabase = {
     markets: {
         save: async (account: MarketAccount) => {
             if (isSupabaseConfigured() && supabase) {
+                console.log("[MockSupabase] Attempting to save account via Supabase...");
+                
                 // 1. 현재 로그인된 사용자 ID 확보 (필수)
                 const { data: { user }, error: authError } = await supabase.auth.getUser();
                 
@@ -190,14 +192,11 @@ export const mockSupabase = {
                 }
 
                 // 2. DB 스키마(Snake Case)에 맞춰 엄격하게 매핑
-                // credentials 객체는 Record<string, string> 타입이므로 대괄호 표기법 사용
                 const payload = {
                     user_id: user.id,
                     market_type: account.marketType,
                     account_name: account.accountName,
                     is_active: account.isActive,
-                    
-                    // 매핑 로직 (왼쪽: DB 컬럼, 오른쪽: 프론트엔드 값)
                     vendor_id: account.credentials['vendorId'] || account.credentials['username'] || '',
                     access_key: account.credentials['accessKey'] || account.credentials['apiKey'] || account.credentials['clientId'] || '',
                     secret_key: account.credentials['secretKey'] || account.credentials['clientSecret'] || account.credentials['password'] || ''
@@ -205,8 +204,14 @@ export const mockSupabase = {
 
                 console.log("Sending Payload to Supabase:", payload);
 
-                // 3. Insert 실행
-                const { error } = await supabase.from('market_accounts').insert(payload);
+                // 3. Insert 실행 (Promise Race로 타임아웃 처리)
+                // 네트워크 문제나 키 설정 오류로 응답이 없을 경우를 대비해 10초 타임아웃 설정
+                const insertPromise = supabase.from('market_accounts').insert(payload);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error("서버 응답 시간이 초과되었습니다. API Key 설정이나 네트워크를 확인해주세요.")), 10000)
+                );
+
+                const { error } = await Promise.race([insertPromise, timeoutPromise]) as any;
 
                 if (error) {
                     console.error("Supabase Insert Error Detail:", error);
@@ -214,13 +219,10 @@ export const mockSupabase = {
                 }
                 
                 return;
+            } else {
+                // Supabase가 설정되지 않았는데 여기로 왔다면 에러 처리
+                throw new Error("Supabase 설정이 올바르지 않습니다. API Key 형식을 확인해주세요.");
             }
-
-            // Local Mock 저장 로직
-            const allStr = localStorage.getItem(STORAGE_KEYS.MARKET_ACCOUNTS);
-            let all: MarketAccount[] = allStr ? JSON.parse(allStr) : [];
-            all.push(account);
-            localStorage.setItem(STORAGE_KEYS.MARKET_ACCOUNTS, JSON.stringify(all));
         },
         delete: async (id: string) => {
             if (isSupabaseConfigured() && supabase) {
@@ -241,7 +243,6 @@ export const mockSupabase = {
                     return [];
                 }
                 
-                // DB의 Flat Columns를 앱의 MarketAccount 타입으로 변환
                 if (data) {
                     return data.map((item: any) => ({
                         id: item.id,
@@ -249,18 +250,17 @@ export const mockSupabase = {
                         accountName: item.account_name,
                         isActive: item.is_active,
                         createdAt: item.created_at,
-                        // credentials 객체 재구성
                         credentials: {
                             accessKey: item.access_key,
-                            apiKey: item.access_key,     // alias
-                            clientId: item.access_key,   // alias
+                            apiKey: item.access_key,
+                            clientId: item.access_key,
                             
                             secretKey: item.secret_key,
-                            clientSecret: item.secret_key, // alias
-                            password: item.secret_key,     // alias
+                            clientSecret: item.secret_key,
+                            password: item.secret_key,
 
                             vendorId: item.vendor_id,
-                            username: item.vendor_id       // alias
+                            username: item.vendor_id
                         }
                     }));
                 }
