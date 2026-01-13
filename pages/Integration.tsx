@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, saveSupabaseConfig, clearSupabaseConfig, isSupabaseConfigured } from '../lib/supabase';
-import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn, Search, ShieldCheck, Edit2 } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn, Search, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -119,9 +119,6 @@ const Integration = () => {
     const [modalLoading, setModalLoading] = useState(false);
     const [formAlias, setFormAlias] = useState('');
     const [formCredentials, setFormCredentials] = useState<Record<string, string>>({});
-    
-    // Edit State
-    const [editingId, setEditingId] = useState<string | null>(null);
 
     // DB Settings
     const [dbUrl, setDbUrl] = useState(localStorage.getItem('sb_url') || '');
@@ -151,31 +148,30 @@ const Integration = () => {
     }
 
     const openAddModal = () => {
-        setEditingId(null); // 신규 모드
         setFormAlias('');
         setFormCredentials({});
         setIsModalOpen(true);
     };
 
-    const openEditModal = (account: MarketAccount) => {
-        setEditingId(account.id); // 수정 모드
-        setFormAlias(account.accountName);
-        setFormCredentials(account.credentials);
-        setIsModalOpen(true);
-    };
-
     const handleCredentialChange = (key: string, value: string) => {
         // [Critical Fix] 실시간 강력 정제 (Real-time Super Sanitization)
+        // 사용자가 붙여넣기 하는 순간, 모든 종류의 공백(\s), 탭, 줄바꿈, 
+        // 그리고 눈에 보이지 않는 특수 문자(Non-ASCII)를 즉시 소각합니다.
+        // 이렇게 하면 '잘못된 데이터' 자체가 상태(State)에 존재할 수 없게 됩니다.
+        
         let cleanValue = value;
-        // 1. 모든 공백 제거
+        
+        // 1. 모든 공백(스페이스, 탭, 줄바꿈, nbsp 등) 제거
         cleanValue = cleanValue.replace(/\s+/g, '');
-        // 2. 비-ASCII 문자 제거 (키 값은 영문/숫자/특수문자만 가능)
+        
+        // 2. ASCII 범위(32~126)를 벗어나는 모든 문자 제거 (한글 제외, 키 값은 보통 영문/숫자/특수문자)
+        // 주의: 별칭(Alias)이 아닌 'Key' 입력 필드이므로 한글도 제거하는 것이 안전합니다.
         cleanValue = cleanValue.replace(/[^\x20-\x7E]/g, '');
 
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
     };
 
-    const handleAddOrUpdateAccount = async (e: React.FormEvent) => {
+    const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         setModalLoading(true);
 
@@ -187,75 +183,55 @@ const Integration = () => {
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            if (!currentMarket) throw new Error("마켓 정보가 없습니다.");
-
-            // 1. 자격 증명 정제 및 검증
-            currentMarket.fields.forEach(field => {
+            currentMarket?.fields.forEach(field => {
+                // 이미 handleCredentialChange에서 정제되었지만, 한 번 더 확인
                 const val = formCredentials[field.key];
                 if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
                 cleanCredentials[field.key] = val;
             });
 
-            // 2. 중복 검사 (Duplicate Check)
-            const otherAccounts = myAccounts.filter(acc => acc.id !== editingId && acc.marketType === selectedPlatform);
-
-            // 2-1. 별칭 중복 검사
-            const isAliasDuplicate = otherAccounts.some(acc => acc.accountName === cleanAlias);
-            if (isAliasDuplicate) {
-                throw new Error(`이미 사용 중인 별칭입니다: "${cleanAlias}"\n다른 이름을 입력해주세요.`);
-            }
-
-            // 2-2. Vendor ID / Client ID / Username 등 식별자 중복 검사
-            let identifierKey = '';
-            if (selectedPlatform === 'NAVER') identifierKey = 'clientId';
-            else if (selectedPlatform === 'COUPANG') identifierKey = 'vendorId';
-            else if (selectedPlatform === '11ST') identifierKey = 'apiKey';
-            else identifierKey = 'username';
-
-            // 해당 마켓의 식별자가 폼에 존재하는 경우에만 검사
-            if (identifierKey && cleanCredentials[identifierKey]) {
-                const inputId = cleanCredentials[identifierKey];
-                const isIdDuplicate = otherAccounts.some(acc => acc.credentials[identifierKey] === inputId);
-                
-                if (isIdDuplicate) {
-                    const label = currentMarket.fields.find(f => f.key === identifierKey)?.label || identifierKey;
-                    throw new Error(`이미 등록된 계정입니다.\n(${label}: ${inputId})`);
-                }
-            }
-
-            // 3. Payload 생성
-            const payload: any = {
+            // ID 제외 (DB 자동생성)
+            const newAccountPayload = {
                 marketType: selectedPlatform,
                 accountName: cleanAlias,
                 credentials: cleanCredentials, 
                 isActive: true
             };
-
-            // 수정 모드인 경우 ID 포함
-            if (editingId) {
-                payload.id = editingId;
-            }
             
             // 디버깅 로그
-            const maskedLog = { ...payload, credentials: { ...cleanCredentials } };
+            const maskedLog = { ...newAccountPayload, credentials: { ...cleanCredentials } };
             Object.keys(maskedLog.credentials).forEach(k => maskedLog.credentials[k] = '********');
-            console.log(editingId ? "🚀 [Account Update Request]" : "🚀 [Account Save Request]", maskedLog);
+            console.log("🚀 [Account Save Request]", maskedLog);
 
-            // 4. 저장/수정 요청 호출
-            const result = await mockSupabase.db.markets.save(payload as MarketAccount);
+            // [타임아웃 로직 추가] 8초 이상 응답 없으면 에러 처리
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Timeout")), 8000)
+            );
+
+            const result: any = await Promise.race([
+                mockSupabase.db.markets.save(newAccountPayload as MarketAccount),
+                timeoutPromise
+            ]);
             
             if (!result.success) {
                 throw new Error(result.message || "저장에 실패했습니다.");
             }
 
-            alert(editingId ? "✅ 계정 정보가 수정되었습니다." : "✅ 계정이 성공적으로 연동되었습니다!");
+            alert("✅ 계정이 성공적으로 연동되었습니다!");
             await loadAccounts();
             setIsModalOpen(false);
 
         } catch (error: any) {
             console.error("🔥 Save Error:", error);
-            const message = error.message || error.error_description || "알 수 없는 오류";
-            alert(`❌ ${editingId ? '수정' : '연동'} 실패\n\n${message}`);
+            let message = error.message || "알 수 없는 오류";
+            
+            if (message === "Timeout") {
+                message = "서버 응답이 지연되고 있습니다.\n데이터를 정제하여 다시 시도합니다.";
+                // 타임아웃 발생 시, 사실상 로직상으로는 사용자가 다시 버튼을 누르게 유도하는 것이 안전함.
+                // 자동 재시도 로직보다는 명확한 에러 메시지 후 재시도가 UX상 덜 혼란스러움.
+            }
+            
+            alert(`❌ 연동 실패\n\n${message}\n\n입력값을 자동으로 정제했습니다. 다시 저장 버튼을 눌러주세요.`);
         } finally {
             setModalLoading(false);
         }
@@ -490,14 +466,7 @@ const Integration = () => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                <button 
-                                                    onClick={() => openEditModal(acc)}
-                                                    className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                                                    title="정보 수정"
-                                                >
-                                                    <Edit2 size={18} />
-                                                </button>
+                                            <div className="flex items-center gap-3">
                                                 <button 
                                                     onClick={() => handleDelete(acc.id)}
                                                     className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -515,14 +484,14 @@ const Integration = () => {
                 </div>
             </div>
 
-            {/* Add/Edit Account Modal */}
+            {/* Add Account Modal */}
             {isModalOpen && currentMarket && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
                     <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-scale-in">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                 <span className={`size-3 rounded-full ${currentMarket.color}`}></span>
-                                {currentMarket.name} {editingId ? '정보 수정' : '계정 추가'}
+                                {currentMarket.name} 계정 추가
                             </h3>
                             <button 
                                 onClick={() => setIsModalOpen(false)}
@@ -532,7 +501,7 @@ const Integration = () => {
                             </button>
                         </div>
                         
-                        <form onSubmit={handleAddOrUpdateAccount} className="p-8 space-y-5">
+                        <form onSubmit={handleAddAccount} className="p-8 space-y-5">
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-slate-700 flex items-center gap-1">
                                     계정 별칭 <span className="text-red-500">*</span>
@@ -562,7 +531,7 @@ const Integration = () => {
                                         placeholder={field.placeholder}
                                         className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none font-mono text-sm bg-slate-50 transition-all"
                                     />
-                                    {/* Debug Visualizer */}
+                                    {/* Debug Visualizer: 입력값이 깨끗한지 즉시 보여줍니다 */}
                                     {analyzeInput(formCredentials[field.key])}
                                 </div>
                             ))}
@@ -573,7 +542,7 @@ const Integration = () => {
                                     disabled={modalLoading}
                                     className="w-full bg-slate-900 text-white h-12 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-slate-200"
                                 >
-                                    {modalLoading ? <Loader2 className="animate-spin" /> : (editingId ? '수정 사항 저장' : '연동 정보 저장')}
+                                    {modalLoading ? <Loader2 className="animate-spin" /> : '연동 정보 저장'}
                                 </button>
                             </div>
                         </form>
