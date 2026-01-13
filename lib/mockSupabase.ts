@@ -269,7 +269,7 @@ export const mockSupabase = {
 
             try {
                 // 4. DB 저장 시도 (snake_case 컬럼 사용)
-                const payload = {
+                const payload: any = {
                     user_id: userId,          // 1. 유저 ID
                     market_type: account.marketType,
                     account_name: account.accountName,
@@ -280,6 +280,11 @@ export const mockSupabase = {
                     access_key: accessKey,   
                     secret_key: secretKey    
                 };
+
+                // FIX: Only include ID if it is a valid string, otherwise let DB auto-generate
+                if (account.id && typeof account.id === 'string' && account.id.trim() !== '') {
+                    payload.id = account.id;
+                }
 
                 const { error } = await supabase.from('market_accounts').insert(payload);
 

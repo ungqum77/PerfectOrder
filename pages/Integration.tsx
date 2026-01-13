@@ -127,56 +127,61 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // 1. 공백 제거 (복사/붙여넣기 시 딸려오는 공백 삭제)
+            // [Fix 1] Auto-Sanitization (Trim Whitespace)
+            // Fixes issues where copy-pasting from websites includes hidden chars or spaces
+            const sanitize = (val: string | undefined) => val ? val.trim() : "";
+            
+            const cleanAlias = sanitize(formAlias);
+            if (!cleanAlias) throw new Error("계정 별칭을 입력해주세요.");
+
             const cleanCredentials: Record<string, string> = {};
-            if (formCredentials) {
-                Object.keys(formCredentials).forEach(key => {
-                    cleanCredentials[key] = formCredentials[key] ? formCredentials[key].trim() : "";
-                });
-            }
+            const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            // 2. DB 컬럼명(snake_case)으로 매핑
-            let dbCredentials = {}; 
-            
-            if (selectedPlatform === 'COUPANG') {
-                if (!cleanCredentials.vendorId) throw new Error("판매자 ID(vendorId)가 비어있습니다.");
-                
-                dbCredentials = {
-                    vendor_id: cleanCredentials.vendorId,
-                    access_key: cleanCredentials.accessKey,
-                    secret_key: cleanCredentials.secretKey
-                };
-            } 
-            else if (selectedPlatform === 'NAVER') {
-                dbCredentials = {
-                    client_id: cleanCredentials.clientId,
-                    client_secret: cleanCredentials.clientSecret
-                };
-            }
+            // Sanitize and Validate required fields
+            currentMarket?.fields.forEach(field => {
+                const val = sanitize(formCredentials[field.key]);
+                if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
+                cleanCredentials[field.key] = val;
+            });
 
-            // 3. 전송 데이터 구성 (id 필드 삭제함 -> DB가 자동 생성)
-            const newAccount = {
-                id: '', // 타입 호환성을 위한 빈 값 (DB에서 자동 생성됨)
+            // [Fix 2] Prepare Payload & ID Handling
+            // We do NOT include 'id' here. Supabase/Postgres will auto-generate a UUID.
+            // We pass 'cleanCredentials' (camelCase keys) directly because mockSupabase.ts 
+            // expects these specific keys (e.g., vendorId, accessKey) to map them to DB columns.
+            const newAccountPayload = {
                 marketType: selectedPlatform,
-                accountName: formAlias,
-                credentials: dbCredentials, 
+                accountName: cleanAlias,
+                credentials: cleanCredentials, 
                 isActive: true
-            } as MarketAccount;
+            };
             
-            console.log("🚀 [전송 데이터]", newAccount);
+            // [Fix 3] Secure Logging
+            // Create a masked copy for debugging to avoid exposing real API keys in console
+            const maskedLog = {
+                ...newAccountPayload,
+                credentials: { ...cleanCredentials }
+            };
+            Object.keys(maskedLog.credentials).forEach(k => {
+                maskedLog.credentials[k] = '********';
+            });
+            console.log("🚀 [Saving Account] Payload (Masked):", maskedLog);
 
-            // 4. 저장 호출
-            const result = await mockSupabase.db.markets.save(newAccount);
+            // 4. Save via Mock/DB Adapter
+            // Casting to 'any' to avoid TS error about missing 'id', since DB generates it.
+            const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
             
+            if (!result.success) {
+                throw new Error(result.message || "저장에 실패했습니다.");
+            }
+
+            alert("✅ 계정이 성공적으로 저장되었습니다!");
             await loadAccounts();
             setIsModalOpen(false);
-            
-            alert("✅ 정상적으로 저장되었습니다!");
 
         } catch (error: any) {
-            console.error("🔥 에러 발생:", error);
+            console.error("🔥 Save Error:", error);
             
-            // 5. 에러 메시지 날것 그대로 보여주기
+            // [Fix 4] Detailed Error Handling
             const rawError = JSON.stringify(error, null, 2);
             const message = error.message || error.error_description || "알 수 없는 오류";
             
