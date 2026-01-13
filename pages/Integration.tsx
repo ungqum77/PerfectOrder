@@ -73,14 +73,15 @@ const MARKETS: MarketInfo[] = [
     },
 ];
 
-// 디버깅 헬퍼 함수: 입력된 문자열의 상세 정보를 분석
+// [Advanced Debugging] 입력값 정밀 분석기
 const analyzeInput = (input: string | undefined) => {
     if (!input) return null;
     const length = input.length;
     
     // 각 문자의 아스키/유니코드 번호를 추출
     const charAnalysis = input.split('').map((char, index) => {
-        const code = char.charCodeAt(0);
+        const code = char.codePointAt(0) || 0;
+        // 일반적인 ASCII 출력 가능 문자 범위 (32~126)
         const isStandard = code >= 32 && code <= 126;
         return { char, code, isStandard };
     });
@@ -90,22 +91,34 @@ const analyzeInput = (input: string | undefined) => {
             <div className="flex justify-between items-center border-b border-slate-700 pb-1 mb-1">
                 <div className="flex gap-3">
                     <span className="text-slate-400">Length: <span className="text-white font-bold">{length}</span></span>
-                    <span className="text-slate-400">Type: <span className="text-white">string</span></span>
+                    <span className="text-slate-400">Encoding: <span className="text-white">UTF-16</span></span>
                 </div>
                 <div className="flex items-center gap-1 text-emerald-500 font-bold">
                     <ShieldCheck size={10} /> 
-                    <span>Clean</span>
+                    <span>Sanitized</span>
                 </div>
             </div>
             <div className="flex flex-wrap gap-1">
                 {charAnalysis.map((item, idx) => (
-                    <span key={idx} className={`px-1 rounded flex items-center justify-center min-w-[20px] h-5 ${item.isStandard ? 'bg-slate-800 text-slate-300' : 'bg-red-600 text-white font-bold'}`}>
+                    <span key={idx} className={`px-1 rounded flex items-center justify-center min-w-[20px] h-5 ${item.isStandard ? 'bg-slate-800 text-slate-300' : 'bg-red-600 text-white font-bold'}`} title={`Code: U+${item.code.toString(16).toUpperCase()}`}>
                         {item.char}<span className="text-[8px] opacity-50 ml-0.5">({item.code})</span>
                     </span>
                 ))}
             </div>
         </div>
     );
+};
+
+// [Core Logic] 강력한 데이터 정제 함수
+const sanitizeCredential = (value: string) => {
+    if (!value) return "";
+    return value
+        .normalize("NFKC") // 1. 유니코드 정규화 (전각문자를 반각으로, 호환 문자 통일)
+        .replace(/[\u200B-\u200D\uFEFF]/g, "") // 2. 제로폭 공백(Zero Width Space), BOM 등 투명 문자 제거
+        .replace(/\u00A0/g, " ") // 3. NBSP(Non-Breaking Space)를 일반 공백으로 변환
+        .replace(/[\r\n\t]/g, "") // 4. 제어 문자(엔터, 탭) 제거
+        .replace(/\s+/g, "") // 5. 모든 공백 제거 (API Key/ID는 공백이 없어야 함)
+        .trim(); // 6. 앞뒤 공백 제거 (혹시 남은 것)
 };
 
 const Integration = () => {
@@ -154,27 +167,36 @@ const Integration = () => {
         setIsModalOpen(true);
     };
 
+    // [Event Handler] 입력 시 실시간 정제
     const handleCredentialChange = (key: string, value: string) => {
-        let cleanValue = value.replace(/\s+/g, ''); // 공백 제거
-        cleanValue = cleanValue.replace(/[^\x20-\x7E]/g, ''); // 비표준 문자 제거
+        const cleanValue = sanitizeCredential(value);
+        
+        // 디버깅용 로그: 정제 전후 비교
+        if (value !== cleanValue) {
+            console.log(`[Sanitize] Input was dirty. Cleaned '${value}' -> '${cleanValue}'`);
+        }
+        
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
     };
 
-    // [핵심] 보이지 않는 메모장 로직 (Invisible Notepad Logic)
+    // [Event Handler] 붙여넣기 시 "보이지 않는 메모장" 로직 수행
     const handlePaste = (e: React.ClipboardEvent, key: string) => {
-        e.preventDefault(); // 기본 붙여넣기 차단
+        e.preventDefault(); // 브라우저 기본 붙여넣기 차단
         
-        // 1. 클립보드에서 텍스트 데이터 추출
+        // 1. 순수 텍스트만 추출
         const text = e.clipboardData.getData('text/plain');
         
-        // 2. 강력한 세탁 로직 (영문, 숫자, 특수문자 외 전부 제거)
-        // 공백, 탭, 줄바꿈, 히든 캐릭터 등 모든 불순물 제거
-        const cleanText = text.replace(/[^a-zA-Z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g, '');
+        // 2. 강력 정제 수행
+        const cleanText = sanitizeCredential(text);
         
-        // 3. 깨끗해진 텍스트를 입력창에 주입
+        console.log(`[Smart Paste] Raw Length: ${text.length} -> Clean Length: ${cleanText.length}`);
+        console.log(`[Paste Debug] Hex Codes:`, Array.from(text).map(c => "U+" + c.codePointAt(0)?.toString(16).toUpperCase()));
+
+        if (text.length !== cleanText.length) {
+            console.warn("⚠️ 붙여넣기 된 텍스트에서 보이지 않는 문자가 제거되었습니다.");
+        }
+
         setFormCredentials(prev => ({ ...prev, [key]: cleanText }));
-        
-        console.log(`[Paste Sanitizer] Original: ${text.length} chars -> Clean: ${cleanText.length} chars`);
     };
 
     // 타임아웃 래퍼 함수
@@ -202,11 +224,18 @@ const Integration = () => {
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
+            // 최종 전송 전 한번 더 검증 및 로깅
+            console.group("🚀 [Final Submission Check]");
             currentMarket?.fields.forEach(field => {
-                const val = formCredentials[field.key];
-                if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
-                cleanCredentials[field.key] = val;
+                const val = formCredentials[field.key] || "";
+                const cleanVal = sanitizeCredential(val); // Safety Check
+                
+                if (!cleanVal) throw new Error(`${field.label}을(를) 입력해주세요.`);
+                
+                cleanCredentials[field.key] = cleanVal;
+                console.log(`${field.key}: "${cleanVal}" (Len: ${cleanVal.length})`);
             });
+            console.groupEnd();
 
             const newAccountPayload = {
                 marketType: selectedPlatform,
@@ -215,20 +244,20 @@ const Integration = () => {
                 isActive: true
             };
             
-            console.log("🚀 [Account Save Request]", newAccountPayload);
-
             // [재시도 로직] 1차 시도 -> 타임아웃 시 -> 2차 시도
             try {
                 await saveWithTimeout(newAccountPayload, 5000); // 5초 타임아웃
             } catch (firstError: any) {
+                console.warn("⚠️ 1차 시도 실패/타임아웃:", firstError);
+                
                 if (firstError.message === "Timeout") {
-                    console.warn("⚠️ 1차 저장 응답 없음. 2차 시도(Retry) 시작...");
+                    console.log("🔄 자동 재시도(Retry) 시작...");
                     setLoadingMessage("응답 지연.. 재시도 중 ↻");
                     
-                    // 2차 시도 (조금 더 긴 타임아웃)
+                    // 2차 시도 (8초 대기)
                     await saveWithTimeout(newAccountPayload, 8000);
                 } else {
-                    throw firstError; // 타임아웃 아니면 바로 에러
+                    throw firstError; // 타임아웃이 아니면 바로 에러 처리
                 }
             }
 
@@ -237,11 +266,10 @@ const Integration = () => {
             setIsModalOpen(false);
 
         } catch (error: any) {
-            console.error("🔥 Save Error:", error);
+            console.error("🔥 Save Error Detailed:", error);
             let message = error.message || "알 수 없는 오류";
             
             if (message === "Timeout") {
-                // 2번이나 시도했는데 안되면 DB 연결 문제일 가능성 높음
                 if (confirm("서버 응답이 없습니다. DB 연결 설정 문제일 수 있습니다.\n\nDB 연결을 해제하고 로컬 모드로 전환하시겠습니까? (저장은 다시 해주셔야 합니다)")) {
                     clearSupabaseConfig();
                     return;
