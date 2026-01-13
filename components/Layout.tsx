@@ -108,7 +108,7 @@ const Sidebar = () => {
             )}
         </div>
 
-        <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+        <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100 mb-3">
           <div 
             className="bg-center bg-no-repeat bg-cover rounded-full size-9 border border-slate-200 bg-slate-200 flex items-center justify-center text-slate-500 font-bold"
           >
@@ -121,6 +121,11 @@ const Sidebar = () => {
           <button onClick={logout} className="text-slate-400 hover:text-slate-700">
             <LogOut size={16} />
           </button>
+        </div>
+        
+        {/* Version Info */}
+        <div className="text-center">
+            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.5 (Build 2026.01.13)</p>
         </div>
       </div>
     </aside>

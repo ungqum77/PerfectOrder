@@ -33,9 +33,10 @@ const MARKETS: MarketInfo[] = [
         color: 'bg-red-500', 
         description: '쿠팡 Wing 판매자 센터 > 판매자 정보 > 추가판매정보 > 오픈API 키 발급에서 확인하세요.',
         fields: [
+            // [수정] 순서 변경: Vendor ID -> Access Key -> Secret Key
+            { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00...' },
             { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
             { key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: '쿠팡 API Secret Key' },
-            { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00...' }
         ]
     },
     { 
@@ -93,8 +94,12 @@ const Integration = () => {
     }, []);
 
     const loadAccounts = async () => {
-        const accounts = await mockSupabase.db.markets.get();
-        setMyAccounts(accounts);
+        try {
+            const accounts = await mockSupabase.db.markets.get();
+            setMyAccounts(accounts);
+        } catch (e) {
+            console.error("Failed to load accounts:", e);
+        }
     }
 
     const openAddModal = () => {
@@ -120,26 +125,30 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // 디버깅용 로그: 전송하려는 데이터 확인
+            // [중요] DB에 보낼 데이터 구성
             const newAccount = {
                 id: Math.random().toString(36).substr(2, 9), // DB에서는 무시됨(auto gen)
                 marketType: selectedPlatform,
                 accountName: formAlias,
-                credentials: formCredentials,
+                credentials: formCredentials, // API 키값들
                 isActive: true
             };
-            console.log('🚀 [Integration] Saving Account:', newAccount);
+            
+            console.log('🚀 [Integration] Saving Account to DB:', newAccount);
 
+            // 실제 저장 호출 (mockSupabase 내부에서 Snake_case 매핑 및 Supabase Insert 수행)
             await mockSupabase.db.markets.save(newAccount);
             
+            console.log('✅ [Integration] Save Success');
             await loadAccounts();
             setIsModalOpen(false);
             alert("계정이 성공적으로 연동되었습니다.");
         } catch (error: any) {
             console.error("🔥 [Integration] Save Failed:", error);
+            // 에러 메시지 사용자에게 노출
             alert(`저장에 실패했습니다.\n오류: ${error.message || error}`);
         } finally {
-            // 성공하든 실패하든 로딩 상태 해제 (무한 로딩 방지)
+            // [필수] 성공/실패 여부와 상관없이 로딩 스피너 종료
             setModalLoading(false);
         }
     };

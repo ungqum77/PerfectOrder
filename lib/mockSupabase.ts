@@ -181,35 +181,38 @@ export const mockSupabase = {
     markets: {
         save: async (account: MarketAccount) => {
             if (isSupabaseConfigured() && supabase) {
-                // 1. 현재 사용자 확인
+                // 1. 현재 로그인된 사용자 ID 확보 (필수)
                 const { data: { user }, error: authError } = await supabase.auth.getUser();
-                if (authError || !user) throw new Error("사용자 인증 정보가 없습니다.");
+                
+                if (authError || !user) {
+                    console.error("Auth Error in Save:", authError);
+                    throw new Error("로그인 정보가 유효하지 않습니다. 다시 로그인해주세요.");
+                }
 
-                // 2. DB 스키마에 맞춰 데이터 매핑 (credentials 객체 -> Flat Columns)
-                // Access Key Mapping: accessKey, apiKey, clientId
-                const accessKey = account.credentials.accessKey || account.credentials.apiKey || account.credentials.clientId;
-                // Secret Key Mapping: secretKey, clientSecret, password
-                const secretKey = account.credentials.secretKey || account.credentials.clientSecret || account.credentials.password;
-                // Vendor ID Mapping: vendorId, username
-                const vendorId = account.credentials.vendorId || account.credentials.username;
-
-                // 3. Snake Case로 변환하여 Insert
-                const { error } = await supabase.from('market_accounts').insert({
+                // 2. DB 스키마(Snake Case)에 맞춰 엄격하게 매핑
+                // credentials 객체는 Record<string, string> 타입이므로 대괄호 표기법 사용
+                const payload = {
                     user_id: user.id,
                     market_type: account.marketType,
                     account_name: account.accountName,
                     is_active: account.isActive,
-                    // Flat Columns
-                    access_key: accessKey,
-                    secret_key: secretKey,
-                    vendor_id: vendorId,
-                    // market_accounts 테이블에 credentials 컬럼이 없다면 제외해야 함
-                });
+                    
+                    // 매핑 로직 (왼쪽: DB 컬럼, 오른쪽: 프론트엔드 값)
+                    vendor_id: account.credentials['vendorId'] || account.credentials['username'] || '',
+                    access_key: account.credentials['accessKey'] || account.credentials['apiKey'] || account.credentials['clientId'] || '',
+                    secret_key: account.credentials['secretKey'] || account.credentials['clientSecret'] || account.credentials['password'] || ''
+                };
+
+                console.log("Sending Payload to Supabase:", payload);
+
+                // 3. Insert 실행
+                const { error } = await supabase.from('market_accounts').insert(payload);
 
                 if (error) {
-                    console.error("Supabase Insert Error:", error);
-                    throw error; // 에러를 호출자에게 전파
+                    console.error("Supabase Insert Error Detail:", error);
+                    throw new Error(error.message); 
                 }
+                
                 return;
             }
 
