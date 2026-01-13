@@ -4,11 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 // [설정 완료]
 // 사용자가 제공한 올바른 JWT Anon Key가 적용되었습니다.
 // =================================================================
-<<<<<<< HEAD
 const YOUR_SUPABASE_URL = "https://oknypcjubolxtlgudhvh.supabase.co"; 
-=======
-
->>>>>>> d8ebf0176e953e464a0d299f1d53036af4f3e61c
 const YOUR_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rbnlwY2p1Ym9seHRsZ3VkaHZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMDQxODEsImV4cCI6MjA4Mzc4MDE4MX0.EIo1IqFpswKLi0SfHbD1U2_Vi3G5ygwaJ6t5PmhQwyQ";
 
 const getSupabaseConfig = () => {
@@ -40,7 +36,7 @@ if (!isValidConfig) {
     console.error("🚨 [Supabase Error] 유효한 설정이 없습니다. lib/supabase.ts 파일을 확인해주세요.");
 }
 
-export const supabase = (isValidConfig) 
+export const supabase = (isValidConfig && config.url && config.key) 
   ? createClient(config.url, config.key)
   : null;
 
