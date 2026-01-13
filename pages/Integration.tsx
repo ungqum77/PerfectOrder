@@ -127,26 +127,34 @@ const Integration = () => {
         setModalLoading(true);
 
         try {
-            // [Fix 1] Auto-Sanitization (Trim Whitespace)
-            // 웹사이트에서 복사 시 딸려오는 공백문자 제거
-            const sanitize = (val: string | undefined) => val ? val.trim() : "";
+            // [Fix 1] 강력한 공백 제거 (Strong Sanitization)
+            // .trim()만으로는 웹사이트 표에서 복사한 탭(\t), 줄바꿈(\n), 특수 공백(\u00A0) 등이 제거되지 않을 수 있습니다.
+            // 따라서 모든 공백 문자를 빈 문자열로 치환합니다. (API Key에는 공백이 없어야 함)
+            const sanitizeKey = (val: string | undefined) => {
+                if (!val) return "";
+                return val.replace(/\s+/g, ''); // 모든 공백 제거
+            };
+
+            // 이름(별칭)은 중간 공백 허용하되 앞뒤 공백만 제거
+            const sanitizeName = (val: string | undefined) => val ? val.trim() : "";
             
-            const cleanAlias = sanitize(formAlias);
+            const cleanAlias = sanitizeName(formAlias);
             if (!cleanAlias) throw new Error("계정 별칭을 입력해주세요.");
 
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            // 필드 유효성 검사 및 정제
+            // 필드 검증 및 정제
             currentMarket?.fields.forEach(field => {
-                const val = sanitize(formCredentials[field.key]);
+                const rawVal = formCredentials[field.key];
+                const val = sanitizeKey(rawVal); // 여기서 강력하게 공백 제거
+                
                 if (!val) throw new Error(`${field.label}을(를) 입력해주세요.`);
                 cleanCredentials[field.key] = val;
             });
 
-            // [Fix 2] Payload 구성 및 ID 처리
-            // 'id' 필드를 포함하지 않아야 DB에서 UUID가 자동 생성됩니다.
-            // camelCase 키(vendorId 등)를 그대로 보냅니다. (backend/mockSupabase에서 DB 컬럼으로 매핑함)
+            // [Fix 2] ID 문제 해결
+            // DB 저장 시 id가 ''(빈 문자열)로 가면 UUID 에러가 발생하므로 id 필드 자체를 생략합니다.
             const newAccountPayload = {
                 marketType: selectedPlatform,
                 accountName: cleanAlias,
@@ -154,19 +162,17 @@ const Integration = () => {
                 isActive: true
             };
             
-            // [Fix 3] 보안 로그 (Masking)
-            // 실제 키가 콘솔에 찍히지 않도록 마스킹 처리
+            // 디버깅용 로그 (키 마스킹 처리)
             const maskedLog = {
                 ...newAccountPayload,
                 credentials: { ...cleanCredentials }
             };
             Object.keys(maskedLog.credentials).forEach(k => {
-                maskedLog.credentials[k] = '********';
+                maskedLog.credentials[k] = '********'; // 보안상 로그에 키 노출 방지
             });
             console.log("🚀 [Account Save Request]", maskedLog);
 
-            // 4. 저장 요청
-            // 타입 캐스팅: MarketAccount에는 id가 필수지만, 저장 시엔 없어도 되므로(DB생성) 캐스팅으로 TS 에러 우회
+            // 저장 요청 (id 생략된 상태로 전달 -> DB가 생성)
             const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
             
             if (!result.success) {
@@ -180,11 +186,10 @@ const Integration = () => {
         } catch (error: any) {
             console.error("🔥 Save Error:", error);
             
-            // [Fix 4] 상세 에러 메시지 표시
             const rawError = JSON.stringify(error, null, 2);
             const message = error.message || error.error_description || "알 수 없는 오류";
             
-            alert(`❌ 연동 실패\n\n${message}\n\n(상세 내용이 콘솔에 기록되었습니다)`);
+            alert(`❌ 연동 실패\n\n${message}\n\n(상세 내용은 콘솔을 확인해주세요)`);
         } finally {
             setModalLoading(false);
         }
