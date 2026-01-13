@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 // (일반적으로 eyJ로 시작하는 긴 문자열입니다)
 // =================================================================
 const YOUR_SUPABASE_URL = "https://oknypcjubolxtlgudhvh.supabase.co";
-const YOUR_SUPABASE_ANON_KEY = "sb_publishable_hQugueyjzI-4nkBOTEq4oQ_SMN82wnl";
+const YOUR_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rbnlwY2p1Ym9seHRsZ3VkaHZoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMDQxODEsImV4cCI6MjA4Mzc4MDE4MX0.EIo1IqFpswKLi0SfHbD1U2_Vi3G5ygwaJ6t5PmhQwyQ";
 
 const getSupabaseConfig = () => {
   // 1. 직접 입력한 값 최우선
