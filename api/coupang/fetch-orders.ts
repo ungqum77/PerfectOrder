@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import crypto from 'crypto';
+import { createHmac } from 'crypto';
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
@@ -8,6 +8,7 @@ export const config = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CORS 설정
   res.setHeader('Access-Control-Allow-Credentials', "true");
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -29,9 +30,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
       const { vendorId, accessKey, secretKey, status } = req.body;
 
-      const cleanVendorId = vendorId ? String(vendorId).trim() : '';
-      const cleanAccessKey = accessKey ? String(accessKey).trim() : '';
-      const cleanSecretKey = secretKey ? String(secretKey).trim() : '';
+      // [핵심 수정] 키 값에 포함된 공백, 줄바꿈 등 모든 화이트스페이스 제거 (복사/붙여넣기 오류 방지)
+      const cleanVendorId = String(vendorId || '').replace(/\s+/g, '');
+      const cleanAccessKey = String(accessKey || '').replace(/\s+/g, '');
+      const cleanSecretKey = String(secretKey || '').replace(/\s+/g, '');
 
       if (!cleanVendorId || !cleanAccessKey || !cleanSecretKey) {
         res.status(400).json({ error: 'Missing required credentials' });
@@ -68,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
       }
 
-      // [IP 확인]
+      // [IP 확인] - 프록시가 정상 작동하는지 확인
       let currentIp = "Unknown";
       try {
           const ipRes = await axios.get('https://api.ipify.org?format=json', {
@@ -81,16 +83,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // 2. 날짜 범위 설정 (KST 기준)
-      // "Today's new orders" 요청에 맞춰 조회 범위를 오늘(Today)로 설정
       const now = new Date();
       const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
       const kstGap = 9 * 60 * 60 * 1000;
       const nowKst = new Date(utc + kstGap);
 
-      // 오늘부터 내일까지 (1일간)
       const tomorrowKst = new Date(nowKst);
       tomorrowKst.setDate(tomorrowKst.getDate() + 1); 
 
+      // YYYY-MM-DD 형식 포맷터
       const fmt = (d: Date) => {
           const y = d.getFullYear();
           const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -99,17 +100,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       const createdAtTo = req.body.createdAtTo || fmt(tomorrowKst);
-      // 기본값: 오늘 (기존 -7일에서 변경됨)
       const createdAtFrom = req.body.createdAtFrom || fmt(nowKst);
 
       // 3. 경로 및 서명 생성
       const method = 'GET';
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${cleanVendorId}/ordersheets`;
       const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
+      
+      // [핵심 수정] 서명 생성 로직 호출
       const { signature, datetime } = generateSignature(method, path, query, cleanSecretKey);
       const url = `https://api-gateway.coupang.com${path}?${query}`;
 
-      // 5. 쿠팡 API 호출 (Axios 사용)
+      // 5. 쿠팡 API 호출
       console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
       
       const apiResponse = await axios({
@@ -119,13 +121,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               'Content-Type': 'application/json',
               'Authorization': `HMAC-SHA256 ${cleanAccessKey}:${signature}`,
               'X-Requested-By': cleanVendorId,
-              'X-Cou-Date': datetime
+              'X-Cou-Date': datetime,
+              'User-Agent': 'PerfectOrder/1.0' // 차단 방지용 User-Agent 추가
           },
           httpsAgent: httpsAgent,
-          proxy: false,
-          validateStatus: () => true
+          proxy: false, // axios의 기본 proxy 설정 비활성화 (httpsAgent 사용 위함)
+          validateStatus: () => true // 모든 상태 코드 허용 (에러 핸들링 직접 수행)
       });
 
+      // 에러 핸들링
       if (apiResponse.status >= 400) {
           const errorData = apiResponse.data;
           const errorText = typeof errorData === 'object' ? JSON.stringify(errorData) : String(errorData);
@@ -133,12 +137,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
           
           let hint = "";
-          if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied") || errorText.includes("ACL")) {
-               if (proxyUrl) {
-                  hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
-              } else {
-                  hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록하거나, 고정 IP 프록시를 설정하세요.`;
-              }
+          // 401 Unauthorized: 서명 오류 또는 키 오류
+          if (apiResponse.status === 401 || errorText.includes("Request is not authorized")) {
+             hint = "🔑 [인증 실패] Access Key 또는 Secret Key가 올바르지 않거나, 업체 코드(Vendor ID)가 일치하지 않습니다.\n키 값에 공백이 없는지 확인해주세요.";
+          }
+          // 403 Forbidden: IP 차단
+          else if (apiResponse.status === 403 || errorText.includes("Access Denied")) {
+             if (proxyUrl) {
+                hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
+            } else {
+                hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다. 서버 IP [${currentIp}]를 쿠팡 윙에 등록하세요.`;
+            }
           }
 
           res.status(apiResponse.status).json({ 
@@ -159,8 +168,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           debugInfo: {
               dateRange: { from: createdAtFrom, to: createdAtTo },
               targetStatus,
-              mappedFrom: status || 'default',
-              usingProxy: !!proxyUrl,
               httpStatus: apiResponse.status
           }
       };
@@ -177,15 +184,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 쿠팡 API v2 서명 생성 함수
 function generateSignature(method: string, path: string, query: string, secretKey: string) {
     const date = new Date();
     const iso = date.toISOString(); 
+    // Format: YYMMDDTHHMMSSZ
     const datetime = iso.replace(/[-:]/g, '').split('.')[0] + 'Z'; 
     const coupangDate = datetime.substring(2); 
 
     const message = coupangDate + method + path + (query ? '?' + query : '');
 
-    const hmac = crypto.createHmac('sha256', secretKey);
+    const hmac = createHmac('sha256', secretKey);
     hmac.update(message);
     const signature = hmac.digest('hex');
 
