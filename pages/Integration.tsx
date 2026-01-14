@@ -4,7 +4,7 @@ import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { marketApi } from '../lib/marketApi';
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2 } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -37,7 +37,7 @@ const MARKETS: MarketInfo[] = [
         description: '쿠팡 Wing 판매자 센터 > 판매자 정보 > 추가판매정보 > 오픈API 키 발급에서 확인하세요.',
         ipGuide: true, // 쿠팡은 IP 설정이 필수이므로 가이드 표시
         fields: [
-            { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00... (로그인 아이디 아님)' },
+            { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00... 또는 C00... (필수)' },
             { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
             { key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: '쿠팡 API Secret Key' },
         ]
@@ -141,7 +141,6 @@ const Integration = () => {
         const cleanValue = sanitizeCredential(value);
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
         setTestResult(null); 
-        // setDetectedIp(null); // 입력 변경시 IP는 초기화하지 않음 (참고용으로 유지)
     };
 
     const handleCredentialPaste = (e: React.ClipboardEvent, key: string) => {
@@ -162,7 +161,6 @@ const Integration = () => {
         e.preventDefault();
         setTestLoading(true);
         setTestResult(null);
-        // setDetectedIp(null); // Keep IP visible
 
         try {
             const tempAccount: MarketAccount = {
@@ -182,23 +180,15 @@ const Integration = () => {
                     body: JSON.stringify({ vendorId, accessKey, secretKey, status: 'ACCEPT' }) // 'ACCEPT' 상태로 테스트
                 });
                 
-                // [Fix] 먼저 텍스트로 읽어서 안전하게 처리 (JSON 파싱 에러 방지)
                 const text = await response.text();
                 let json;
                 try {
                     json = JSON.parse(text);
                 } catch (e) {
-                    // JSON이 아니라면 서버 에러 메시지(HTML/Text)일 가능성 높음
                     const errorPreview = text.length > 200 ? text.substring(0, 200) + '...' : text;
-                    
-                    if (text.includes("FUNCTION_INVOCATION_FAILED")) {
-                        throw new Error(`서버 내부 오류 (Function Crash): ${errorPreview}\n잠시 후 다시 시도해주세요.`);
-                    }
-
                     throw new Error(`서버 응답 오류 (Status ${response.status}): ${errorPreview}`);
                 }
                 
-                // IP 정보 업데이트 (성공이든 실패든)
                 if (json.currentIp) {
                     setDetectedIp(json.currentIp);
                 }
@@ -212,9 +202,9 @@ const Integration = () => {
                 let message = `✅ 연동 성공! (HTTP 200 OK)\n`;
                 
                 if (count > 0) {
-                    message += `최근 7일간 ${count}건의 신규 주문(결제완료)을 발견했습니다.`;
+                    message += `최근 24시간 내 ${count}건의 신규 주문(결제완료)을 발견했습니다.`;
                 } else {
-                    message += `자격 증명은 유효합니다. 다만, 최근 7일간 '결제완료' 상태의 주문이 0건입니다.\n(다른 상태의 주문이 있어도 테스트 조건에 맞지 않으면 0건으로 표시됩니다)`;
+                    message += `자격 증명은 유효합니다. 다만, 최근 24시간 내 '결제완료' 상태의 주문이 0건입니다.`;
                 }
 
                 setTestResult({ 
@@ -240,7 +230,6 @@ const Integration = () => {
             if (errorMsg.includes("404")) errorMsg += "\n(API 경로를 찾을 수 없습니다. Vercel 배포 환경인지 확인해주세요)";
             if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 상단의 감지된 IP를 등록해주세요)";
             
-            // [중요] 백엔드에서 전달받은 감지된 IP가 있으면 상태 업데이트
             if (error.currentIp) {
                 setDetectedIp(error.currentIp);
             }
@@ -441,7 +430,7 @@ const Integration = () => {
                         </div>
                         
                         <div className="overflow-y-auto flex-1 p-8 space-y-5">
-                            {/* [IP Guide] 쿠팡 전용 IP 가이드 (상황에 따라 동적 표시) */}
+                            {/* [IP Guide] 쿠팡 전용 IP 가이드 */}
                             {currentMarket.ipGuide && (
                                 <div className={`border rounded-xl p-4 mb-4 transition-colors ${detectedIp ? 'bg-indigo-50 border-indigo-200' : 'bg-blue-50 border-blue-100'}`}>
                                     <div className="flex items-start gap-3">
@@ -453,21 +442,27 @@ const Integration = () => {
                                                 {detectedIp ? '감지된 서버 IP' : '동적 IP 설정 안내'}
                                             </h5>
                                             <p className={`text-xs leading-relaxed mb-3 ${detectedIp ? 'text-indigo-700' : 'text-blue-700'}`}>
-                                                클라우드 환경 특성상 IP가 수시로 변경됩니다. 
+                                                클라우드 특성상 IP가 자주 변경됩니다.
                                                 {!detectedIp && <br/>}
                                                 {!detectedIp && '먼저 [연동 테스트]를 진행하면 현재 할당된 IP를 확인할 수 있습니다.'}
                                                 {detectedIp && '아래 IP를 복사하여 쿠팡 윙 [판매자 정보 > 추가판매정보 > 오픈API 키] 설정에 등록하세요.'}
                                             </p>
                                             
                                             {detectedIp && (
-                                                <div className="flex items-center gap-2 bg-white rounded-lg border border-indigo-200 p-2 shadow-sm">
-                                                    <code className="flex-1 font-mono text-sm font-bold text-slate-800 text-center">{detectedIp}</code>
-                                                    <button 
-                                                        onClick={handleCopyIp}
-                                                        className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs font-bold rounded-md transition-colors flex items-center gap-1"
-                                                    >
-                                                        <Copy size={12} /> 복사
-                                                    </button>
+                                                <div className="flex flex-col gap-2">
+                                                    <div className="flex items-center gap-2 bg-white rounded-lg border border-indigo-200 p-2 shadow-sm">
+                                                        <code className="flex-1 font-mono text-sm font-bold text-slate-800 text-center">{detectedIp}</code>
+                                                        <button 
+                                                            onClick={handleCopyIp}
+                                                            className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-xs font-bold rounded-md transition-colors flex items-center gap-1"
+                                                        >
+                                                            <Copy size={12} /> 복사
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex items-start gap-2 text-[11px] text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100">
+                                                        <Clock size={12} className="mt-0.5 shrink-0" />
+                                                        <span>주의: 쿠팡 윙에 IP 등록 후 서버에 반영되기까지 약 10분이 소요됩니다. 즉시 테스트 시 에러가 발생할 수 있습니다.</span>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
