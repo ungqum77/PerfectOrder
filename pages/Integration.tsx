@@ -4,7 +4,7 @@ import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { marketApi } from '../lib/marketApi';
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock, Bug } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -154,6 +154,48 @@ const Integration = () => {
         if(detectedIp) {
             navigator.clipboard.writeText(detectedIp);
             alert(`서버 IP [${detectedIp}]가 복사되었습니다.\n쿠팡 윙에 붙여넣기 하세요.`);
+        }
+    };
+
+    // [New] 하드코딩된 값으로 테스트하는 함수
+    const handleDebugHardcodedTest = async () => {
+        if (!confirm("🚨 주의: 입력된 값 대신 서버에 하드코딩된(저장된) 키 값으로 테스트합니다.\n계속하시겠습니까?")) return;
+
+        setTestLoading(true);
+        setTestResult(null);
+
+        try {
+            const response = await fetch('/api/coupang/debug-test', {
+                method: 'POST', // POST or GET, endpoint uses POST usually or checks method
+            });
+            const json = await response.json();
+            
+            if (json.currentIp) {
+                setDetectedIp(json.currentIp);
+            }
+
+            if (!response.ok) {
+                 throw new Error(json.details || json.error || "테스트 실패");
+            }
+
+            setTestResult({
+                success: true,
+                message: json.message,
+                details: {
+                    ip: json.currentIp,
+                    count: json.data?.length || 0,
+                    status: 'DEBUG MODE'
+                }
+            });
+
+        } catch (e: any) {
+            console.error(e);
+            setTestResult({
+                success: false,
+                message: `❌ 하드코딩 테스트 실패:\n${e.message}`
+            });
+        } finally {
+            setTestLoading(false);
         }
     };
 
@@ -541,25 +583,38 @@ const Integration = () => {
                             )}
                         </div>
 
-                        <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3">
-                            <button 
-                                type="button"
-                                onClick={handleTestConnection}
-                                disabled={testLoading || modalLoading}
-                                className="flex-1 bg-white border border-slate-200 text-slate-700 h-12 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-                            >
-                                {testLoading ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} className="text-amber-500"/>}
-                                연동 테스트
-                            </button>
-                            <button 
-                                onClick={handleAddAccount}
-                                disabled={modalLoading || testLoading}
-                                className="flex-[2] bg-slate-900 text-white h-12 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-slate-200"
-                            >
-                                {modalLoading ? (
-                                    <><Loader2 className="animate-spin" /> {loadingMessage}</>
-                                ) : '저장하기'}
-                            </button>
+                        <div className="p-6 border-t border-slate-100 bg-slate-50 flex flex-col gap-3">
+                            <div className="flex gap-3">
+                                <button 
+                                    type="button"
+                                    onClick={handleTestConnection}
+                                    disabled={testLoading || modalLoading}
+                                    className="flex-1 bg-white border border-slate-200 text-slate-700 h-12 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {testLoading ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} className="text-amber-500"/>}
+                                    연동 테스트
+                                </button>
+                                <button 
+                                    onClick={handleAddAccount}
+                                    disabled={modalLoading || testLoading}
+                                    className="flex-[2] bg-slate-900 text-white h-12 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-slate-200"
+                                >
+                                    {modalLoading ? (
+                                        <><Loader2 className="animate-spin" /> {loadingMessage}</>
+                                    ) : '저장하기'}
+                                </button>
+                            </div>
+                            
+                            {/* 하드코딩 테스트 버튼 추가 (쿠팡일 때만 표시) */}
+                            {selectedPlatform === 'COUPANG' && (
+                                <button
+                                    type="button"
+                                    onClick={handleDebugHardcodedTest}
+                                    className="w-full text-xs text-red-500 font-medium hover:underline flex items-center justify-center gap-1 mt-1 opacity-70 hover:opacity-100"
+                                >
+                                    <Bug size={12} /> 🚨 강제 하드코딩 테스트 (Debug)
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

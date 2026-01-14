@@ -1,19 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import CryptoJS from 'crypto-js';
+import { createHmac } from 'node:crypto';
 
 export const config = {
   maxDuration: 10,
 };
 
 // [강력한 정제 함수] 
-// 복사/붙여넣기 시 딸려오는 보이지 않는 공백(Zero-width space 등)까지 제거
 const sanitize = (val: any) => {
     if (!val) return '';
+    // 공백, 줄바꿈, 탭, 보이지 않는 문자 모두 제거
     return String(val)
-        .replace(/\s+/g, '') // 일반 공백 제거
-        .replace(/[\u200B-\u200D\uFEFF]/g, '') // 특수 공백 제거
+        .replace(/\s+/g, '') 
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
         .trim();
 };
 
@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
       const { vendorId, accessKey, secretKey, status } = req.body;
 
-      // 1. 입력값 강력 정제 (가장 중요한 단계)
+      // 1. 입력값 정제
       const cleanVendorId = sanitize(vendorId).toUpperCase();
       const cleanAccessKey = sanitize(accessKey);
       const cleanSecretKey = sanitize(secretKey);
@@ -67,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const rawStatus = status ? status.toUpperCase() : 'ACCEPT';
       const targetStatus = statusMap[rawStatus] || rawStatus;
 
-      // 3. Proxy Agent 설정
+      // 3. Proxy 설정
       const proxyUrl = process.env.FIXED_IP_PROXY_URL;
       let httpsAgent: any = undefined;
 
@@ -79,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
       }
 
-      // [IP 확인 - 디버깅용]
+      // IP 확인
       let currentIp = "Unknown";
       try {
           const ipRes = await axios.get('https://api.ipify.org?format=json', {
@@ -91,8 +91,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.warn("IP Check Failed");
       }
 
-      // 4. 날짜 및 쿼리 파라미터 생성
-      // 4-1. Signature용 DateTime (UTC, YYMMDDTHHMMSSZ)
+      // 4. 시간 및 쿼리 생성
+      // DateTime: YYMMDDTHHMMSSZ (UTC 기준)
       const d = new Date();
       const yy = String(d.getUTCFullYear()).slice(2);
       const MM = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -102,33 +102,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const ss = String(d.getUTCSeconds()).padStart(2, '0');
       const datetime = `${yy}${MM}${dd}T${HH}${mm}${ss}Z`;
 
-      // 4-2. Query Param용 Date (KST 기준 YYYY-MM-DD)
+      // Query Params (KST 기준 날짜)
       const kstOffset = 9 * 60 * 60 * 1000;
       const nowKst = new Date(d.getTime() + kstOffset);
       const nextDayKst = new Date(nowKst);
-      nextDayKst.setDate(nextDayKst.getDate() + 2); // 넉넉하게 +2일
+      nextDayKst.setDate(nextDayKst.getDate() + 2);
 
       const fmtDate = (date: Date) => date.toISOString().split('T')[0];
       const createdAtFrom = req.body.createdAtFrom || fmtDate(nowKst);
       const createdAtTo = req.body.createdAtTo || fmtDate(nextDayKst);
 
-      // 5. 경로 및 쿼리 스트링 구성 (수동 조합으로 순서 완벽 보장)
       const method = 'GET';
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${cleanVendorId}/ordersheets`;
       
-      // 중요: 알파벳 순서 (createdAtFrom -> createdAtTo -> status)
+      // [중요] 쿼리 스트링 정렬 (알파벳 순서: c -> c -> s)
+      // createdAtFrom, createdAtTo, status
       const queryString = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
       
-      // 6. 서명 생성 (crypto-js 사용)
-      // Message: DateTime + Method + Path + QueryString
+      // 5. 서명 생성 (Node.js Native Crypto)
+      // Message 구조: DateTime + Method + Path + ? + QueryString
       const message = datetime + method + path + '?' + queryString;
-      const signature = CryptoJS.HmacSHA256(message, cleanSecretKey).toString(CryptoJS.enc.Hex);
+      
+      const hmac = createHmac('sha256', cleanSecretKey);
+      hmac.update(message);
+      const signature = hmac.digest('hex');
 
       const url = `https://api-gateway.coupang.com${path}?${queryString}`;
 
-      console.log(`[Coupang] Call: ${targetStatus} (IP: ${currentIp})`);
+      console.log(`[Coupang] Signing Message: ${message.replace(cleanSecretKey, '***')}`);
+      console.log(`[Coupang] URL: ${url}`);
 
-      // 7. API 호출
+      // 6. API 호출
       const apiResponse = await axios({
           method: method,
           url: url,
@@ -140,25 +144,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               'User-Agent': 'PerfectOrder/1.0'
           },
           httpsAgent: httpsAgent,
-          proxy: false, // axios 기본 프록시 비활성화 (agent 충돌 방지)
-          validateStatus: () => true // 에러 발생 시에도 catch로 가지 않고 직접 처리
+          proxy: false, 
+          validateStatus: () => true 
       });
 
-      // 8. 응답 처리
       if (apiResponse.status >= 400) {
           const errorData = apiResponse.data;
           const errorText = typeof errorData === 'object' ? JSON.stringify(errorData) : String(errorData);
           
-          console.error(`Coupang Error: ${apiResponse.status} - ${errorText}`);
+          console.error(`[Coupang Error] ${apiResponse.status} - ${errorText}`);
           
           let hint = "";
-          // 401: 서명 불일치, 키 오류
+          // 401 Unauthorized
           if (apiResponse.status === 401 || errorText.includes("not authorized")) {
-             hint = `🔑 [인증 실패] (401)\n1. Access Key와 Secret Key가 서로 바뀐 것은 아닌지 확인하세요.\n2. 업체 코드(Vendor ID)가 정확한지 확인하세요.\n3. 서버 IP [${currentIp}]가 쿠팡 윙에 등록되었는지 확인하세요.`;
+             hint = `🔑 [인증 실패] (401)\n1. 업체 코드(Vendor ID)가 올바른지 확인하세요 (현재: ${cleanVendorId})\n2. Access Key가 해당 Vendor ID용으로 발급된 것인지 확인하세요.\n3. IP [${currentIp}]가 쿠팡 윙에 등록되었는지 확인하세요.\n(서명 생성 시간: ${datetime})`;
           }
-          // 403: IP 차단 등
+          // 403 Forbidden
           else if (apiResponse.status === 403) {
-             hint = `⚠️ [접속 차단] (403)\n서버 IP [${currentIp}]가 허용되지 않았습니다.\n쿠팡 윙 접속정보 설정에서 IP를 등록해주세요.`;
+             hint = `⚠️ [접속 차단] (403)\nIP [${currentIp}]가 허용되지 않았습니다. 쿠팡 윙에서 IP를 등록해주세요.`;
           }
 
           res.status(apiResponse.status).json({ 
@@ -171,7 +174,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
       }
 
-      // 성공
       res.status(200).json({
           ...apiResponse.data,
           currentIp: currentIp,
