@@ -182,7 +182,16 @@ const Integration = () => {
                     body: JSON.stringify({ vendorId, accessKey, secretKey, status: 'ACCEPT' }) // 'ACCEPT' 상태로 테스트
                 });
                 
-                const json = await response.json();
+                // [Fix] 먼저 텍스트로 읽어서 안전하게 처리 (JSON 파싱 에러 방지)
+                const text = await response.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    // JSON이 아니라면 서버 에러 메시지(HTML/Text)일 가능성 높음
+                    const errorPreview = text.length > 200 ? text.substring(0, 200) + '...' : text;
+                    throw new Error(`서버 응답 오류 (Status ${response.status}): ${errorPreview}`);
+                }
                 
                 // IP 정보 업데이트 (성공이든 실패든)
                 if (json.currentIp) {
