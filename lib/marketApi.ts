@@ -64,7 +64,7 @@ export const marketApi = {
     },
 
     /**
-     * 쿠팡 주문 수집 (Proxy API 사용)
+     * 쿠팡 주문 수집 (Proxy API 사용) - 모든 상태 동기화
      */
     fetchCoupangOrders: async (credential: MarketAccount): Promise<Order[]> => {
         const { accessKey, secretKey, vendorId } = credential.credentials;
@@ -74,69 +74,82 @@ export const marketApi = {
             return [];
         }
 
+        // 쿠팡에서 조회할 상태 목록
+        // ACCEPT: 결제완료 -> 신규주문 (NEW)
+        // INSTRUCT: 상품준비중 -> 발송대기 (PENDING)
+        // DEPARTURE: 배송지시 -> 배송중 (SHIPPING)
+        // DELIVERING: 배송중 -> 배송중 (SHIPPING)
+        // FINAL_DELIVERY: 배송완료 -> 배송완료 (DELIVERED)
+        const targetStatuses = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
+        let allCoupangOrders: Order[] = [];
+
         try {
-            // CORS 우회를 위해 백엔드 프록시 호출
-            const response = await fetch('/api/coupang/fetch-orders', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    vendorId,
-                    accessKey,
-                    secretKey
+            // 병렬로 모든 상태 호출
+            const requests = targetStatuses.map(status => 
+                fetch('/api/coupang/fetch-orders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vendorId, accessKey, secretKey, status })
+                }).then(async (res) => {
+                    if (!res.ok) {
+                        const err = await res.text();
+                        console.warn(`쿠팡 ${status} 조회 실패: ${err}`);
+                        return []; // 실패 시 해당 상태는 빈 배열 처리 (전체 실패 방지)
+                    }
+                    const json = await res.json();
+                    return json.data || [];
                 })
+            );
+
+            const results = await Promise.all(requests);
+
+            // 결과 평탄화 및 매핑
+            results.forEach((items: any[], index) => {
+                const coupangStatus = targetStatuses[index];
+                
+                const mappedOrders = items.map((item: any) => {
+                    const receiver = item.receiver || {};
+                    const orderer = item.orderer || {};
+                    const parcel = item.parcel || {};
+                    const boxItem = parcel.boxItem || {};
+
+                    return {
+                        id: `C-${item.orderId}`,
+                        platform: 'COUPANG',
+                        orderNumber: String(item.orderId),
+                        productId: String(item.vendorItemId || boxItem.vendorItemId || ''),
+                        productName: item.vendorItemName || item.itemName || '상품명 미상',
+                        option: item.vendorItemPackageName || '단품',
+                        amount: item.orderPrice || 0,
+                        
+                        ordererName: orderer.name || '구매자',
+                        ordererPhone: orderer.safeNumber || '', // 안심번호
+                        ordererId: orderer.email || '',
+                        
+                        receiverName: receiver.name || orderer.name,
+                        receiverPhone: receiver.safeNumber || '',
+                        receiverAddress: `${receiver.addr1 || ''} ${receiver.addr2 || ''}`.trim(),
+                        shippingMemo: item.deliveryRequestMessage || '',
+                        
+                        date: item.orderedAt ? item.orderedAt.replace('T', ' ').substring(0, 19) : '',
+                        paymentDate: item.paidAt ? item.paidAt.replace('T', ' ').substring(0, 19) : '',
+                        
+                        // 상태 매핑
+                        status: mapCoupangStatus(coupangStatus),
+                        courier: item.deliveryCompanyName || '',
+                        invoiceNumber: item.invoiceNumber || '',
+                        customerName: orderer.name || '구매자' // 호환성
+                    } as Order;
+                });
+                
+                allCoupangOrders = [...allCoupangOrders, ...mappedOrders];
             });
 
-            if (!response.ok) {
-                 const errorText = await response.text();
-                 throw new Error(`Coupang API Error (${response.status}): ${errorText}`);
-            }
-
-            const json = await response.json();
-
-            // 5. 데이터 매핑 (Coupang Response -> App Order)
-            // 쿠팡 API 문서(Ordersheet) 기준 매핑
-            if (!json.data) return [];
-
-            return json.data.map((item: any) => {
-                const receiver = item.receiver || {};
-                const orderer = item.orderer || {};
-                const parcel = item.parcel || {};
-                const boxItem = parcel.boxItem || {};
-
-                return {
-                    id: `C-${item.orderId}`,
-                    platform: 'COUPANG',
-                    orderNumber: String(item.orderId),
-                    productId: String(item.vendorItemId || boxItem.vendorItemId || ''),
-                    productName: item.vendorItemName || item.itemName || '상품명 미상',
-                    option: item.vendorItemPackageName || '단품',
-                    amount: item.orderPrice || 0,
-                    
-                    ordererName: orderer.name || '구매자',
-                    ordererPhone: orderer.safeNumber || '', // 안심번호
-                    ordererId: orderer.email || '', // 쿠팡은 이메일을 ID처럼 사용
-                    
-                    receiverName: receiver.name || orderer.name,
-                    receiverPhone: receiver.safeNumber || '',
-                    receiverAddress: `${receiver.addr1 || ''} ${receiver.addr2 || ''}`.trim(),
-                    shippingMemo: item.deliveryRequestMessage || '',
-                    
-                    date: item.orderedAt ? item.orderedAt.replace('T', ' ').substring(0, 19) : '',
-                    paymentDate: item.paidAt ? item.paidAt.replace('T', ' ').substring(0, 19) : '',
-                    
-                    status: 'NEW', // ACCEPT 상태만 가져오므로 NEW
-                    courier: '',
-                    invoiceNumber: '',
-                    customerName: orderer.name || '구매자' // 호환성
-                };
-            });
+            return allCoupangOrders;
 
         } catch (e: any) {
-            console.error("쿠팡 연동 실패:", e.message);
-            // 실제 데이터 연동이 실패하면 에러를 던져서 UI에서 알 수 있게 함 (데모 데이터 반환 X)
-            throw e; 
+            console.error("쿠팡 연동 치명적 오류:", e.message);
+            throw e; // 상위로 에러 전파하여 UI에 표시
         }
     },
 
@@ -153,15 +166,12 @@ export const marketApi = {
                 const orders = await marketApi.fetchNaverOrders(cred);
                 allOrders = [...allOrders, ...orders];
             } else if (cred.marketType === 'COUPANG') {
-                // 쿠팡의 경우 에러 발생 시 전체 중단을 막기 위해 개별 try-catch 사용 가능
-                // 하지만 사용자가 '실제 연결' 확인을 원하므로 에러를 상위로 전파할 수도 있음.
-                // 여기서는 에러 발생 시 해당 계정만 건너뛰고 로그를 남기도록 처리
                 try {
                     const orders = await marketApi.fetchCoupangOrders(cred);
                     allOrders = [...allOrders, ...orders];
                 } catch (e) {
                     console.error(`쿠팡(${cred.accountName}) 동기화 중 오류 발생`);
-                    // 필요시 throw e; 하여 전체 중단 가능
+                    throw new Error(`쿠팡 연동 실패: 접속 정보를 확인해주세요.`);
                 }
             }
         }
@@ -179,6 +189,18 @@ function mapNaverStatus(naverStatus: string): OrderStatus {
         case 'DELIVERED': return 'DELIVERED';
         case 'CANCELED': return 'CANCELLED';
         case 'RETURNED': return 'RETURNED';
+        default: return 'NEW';
+    }
+}
+
+// 쿠팡 상태 매핑 헬퍼
+function mapCoupangStatus(coupangStatus: string): OrderStatus {
+    switch (coupangStatus) {
+        case 'ACCEPT': return 'NEW';          // 결제완료 -> 신규주문
+        case 'INSTRUCT': return 'PENDING';    // 상품준비중 -> 발송대기
+        case 'DEPARTURE': return 'SHIPPING';  // 배송지시 -> 배송중
+        case 'DELIVERING': return 'SHIPPING'; // 배송중 -> 배송중
+        case 'FINAL_DELIVERY': return 'DELIVERED'; // 배송완료 -> 배송완료
         default: return 'NEW';
     }
 }

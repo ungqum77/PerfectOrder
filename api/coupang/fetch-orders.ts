@@ -28,12 +28,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const { vendorId, accessKey, secretKey } = req.body;
+  const { vendorId, accessKey, secretKey, status } = req.body;
 
   if (!vendorId || !accessKey || !secretKey) {
     res.status(400).json({ error: 'Missing required credentials (vendorId, accessKey, secretKey)' });
     return;
   }
+
+  // [중요] 조회할 상태 (기본값: ACCEPT)
+  const targetStatus = status || 'ACCEPT';
 
   try {
     // 1. 날짜 범위 설정 (최근 3일)
@@ -51,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // createdAtFrom (c) -> createdAtTo (c) -> status (s)
     const method = 'GET';
     const path = `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`;
-    const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=ACCEPT`;
+    const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
 
     // 3. HMAC 서명 생성
     const { signature, datetime } = generateSignature(method, path, query, secretKey);
@@ -59,9 +62,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 4. 쿠팡 API 호출
     const url = `https://api-gateway.coupang.com${path}?${query}`;
     
-    // 타임아웃 10초 설정
+    // 타임아웃 15초 설정
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const apiResponse = await fetch(url, {
         method: method,
@@ -78,12 +81,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
-        console.error(`Coupang API Error: ${apiResponse.status} - ${errorText}`);
+        console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
         
         // 에러 상세 내용을 클라이언트로 전달
         res.status(apiResponse.status).json({ 
             error: 'Coupang API Request Failed',
             details: errorText,
+            targetStatus: targetStatus,
             statusCode: apiResponse.status
         });
         return;
@@ -93,8 +97,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(data);
 
   } catch (error: any) {
-    console.error('Server Error:', error);
-    res.status(500).json({ error: error.message || 'Internal Server Error' });
+    console.error(`Server Error (${targetStatus}):`, error);
+    res.status(500).json({ error: error.message || 'Internal Server Error', targetStatus });
   }
 }
 

@@ -1,5 +1,5 @@
 import { User, UserRole, PlanType, MarketAccount, Order, OrderStatus } from '../types';
-import { MOCK_ORDERS } from '../constants';
+// MOCK_ORDERS import 제거 (사용하지 않음)
 import { supabase, isSupabaseConfigured } from './supabase';
 import { marketApi } from './marketApi';
 
@@ -207,7 +207,7 @@ export const mockSupabase = {
     },
     
     // =================================================================
-    // V3: Market Logic (Flat Table Structure)
+    // V3: Market Logic
     // =================================================================
     markets: {
         get: async (): Promise<MarketAccount[]> => {
@@ -338,21 +338,22 @@ export const mockSupabase = {
 
     orders: {
         init: () => {
+            // [Fix] 초기화를 빈 배열로 설정하여 임의의 Mock 데이터를 사용하지 않음
             if (!localStorage.getItem(STORAGE_KEYS.ORDERS)) {
-                localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(MOCK_ORDERS));
+                localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
             }
         },
         getAll: async (): Promise<Order[]> => {
             const str = localStorage.getItem(STORAGE_KEYS.ORDERS);
             if (!str) {
-                localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(MOCK_ORDERS));
-                return MOCK_ORDERS;
+                localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify([]));
+                return [];
             }
             return JSON.parse(str);
         },
         updateStatus: async (orderIds: string[], newStatus: OrderStatus) => {
             const str = localStorage.getItem(STORAGE_KEYS.ORDERS);
-            let orders: Order[] = str ? JSON.parse(str) : MOCK_ORDERS;
+            let orders: Order[] = str ? JSON.parse(str) : [];
             orders = orders.map(order => orderIds.includes(order.id) ? { ...order, status: newStatus } : order);
             localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
         },
@@ -361,37 +362,43 @@ export const mockSupabase = {
             // 1. 등록된 마켓 계정 가져오기
             let accounts = await mockSupabase.db.markets.get();
 
-            // [변경] 계정이 없으면 그냥 종료합니다 (데모 계정 자동 생성 안 함)
             if (accounts.length === 0) {
                 alert("연동된 마켓 계정이 없습니다.\n[연동 관리] 메뉴에서 계정을 먼저 추가해주세요.");
                 return 0;
             }
 
             try {
-                // 2. 외부 API를 통해 주문 수집
+                // 2. 외부 API를 통해 주문 수집 (실제 데이터)
                 const newOrders = await marketApi.syncAllMarkets(accounts);
-                if (newOrders.length === 0) return 0;
-
+                
                 // 3. 기존 데이터와 병합 (중복 제거)
                 const str = localStorage.getItem(STORAGE_KEYS.ORDERS);
-                let currentOrders: Order[] = str ? JSON.parse(str) : MOCK_ORDERS;
+                let currentOrders: Order[] = str ? JSON.parse(str) : [];
                 
                 let addedCount = 0;
+                let updateCount = 0;
+
                 newOrders.forEach(newOrder => {
-                    // 주문번호와 플랫폼이 같은 주문이 있는지 확인
-                    const exists = currentOrders.some(o => o.orderNumber === newOrder.orderNumber && o.platform === newOrder.platform);
-                    if (!exists) {
-                        currentOrders.unshift(newOrder); // 최신 주문이 위로 오도록 추가
+                    const idx = currentOrders.findIndex(o => o.orderNumber === newOrder.orderNumber && o.platform === newOrder.platform);
+                    if (idx >= 0) {
+                        // 이미 존재하면 상태 등 최신 정보 업데이트
+                        if (currentOrders[idx].status !== newOrder.status) {
+                            currentOrders[idx] = newOrder;
+                            updateCount++;
+                        }
+                    } else {
+                        // 신규 주문
+                        currentOrders.unshift(newOrder); 
                         addedCount++;
                     }
                 });
 
                 // 4. 로컬 스토리지 업데이트
                 localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
-                return addedCount;
+                return addedCount + updateCount;
             } catch (e) {
                 console.error("Sync Error:", e);
-                throw e; // 상위에서 에러를 잡을 수 있게 throw
+                throw e; 
             }
         }
     }
