@@ -190,6 +190,11 @@ const Integration = () => {
                 } catch (e) {
                     // JSON이 아니라면 서버 에러 메시지(HTML/Text)일 가능성 높음
                     const errorPreview = text.length > 200 ? text.substring(0, 200) + '...' : text;
+                    
+                    if (text.includes("FUNCTION_INVOCATION_FAILED")) {
+                        throw new Error(`서버 내부 오류 (Function Crash): ${errorPreview}\n잠시 후 다시 시도해주세요.`);
+                    }
+
                     throw new Error(`서버 응답 오류 (Status ${response.status}): ${errorPreview}`);
                 }
                 
