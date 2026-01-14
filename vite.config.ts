@@ -4,6 +4,6 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: 'build', // 기존 CRA 배포 설정과의 호환성을 위해 build 폴더 사용
+    outDir: 'dist', // Vercel이 Vite 프로젝트에서 기대하는 기본 출력 폴더명
   }
 });
