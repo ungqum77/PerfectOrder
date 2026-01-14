@@ -4,7 +4,7 @@ import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { marketApi } from '../lib/marketApi';
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock, Bug } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock, Bug, Network } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -126,7 +126,7 @@ const Integration = () => {
     const [testResult, setTestResult] = useState<{ 
         success: boolean; 
         message: string; 
-        details?: { ip?: string, count?: number, status?: string } 
+        details?: { ip?: string, count?: number, status?: string, proxy?: boolean } 
     } | null>(null); 
     const [loadingMessage, setLoadingMessage] = useState<string>('연동 정보 저장');
     const [formAlias, setFormAlias] = useState('');
@@ -195,7 +195,6 @@ const Integration = () => {
                 method: 'POST', // POST or GET, endpoint uses POST usually or checks method
             });
             
-            // JSON 파싱 안전하게 처리
             const text = await response.text();
             let json;
             try {
@@ -204,11 +203,14 @@ const Integration = () => {
                 throw new Error(`Invalid JSON Response: ${text.substring(0, 100)}...`);
             }
             
-            if (json.currentIp) {
+            // IP 정보 업데이트 (에러여도 IP는 중요함)
+            if (json.currentIp && json.currentIp !== 'Unknown') {
                 setDetectedIp(json.currentIp);
             }
 
             if (!response.ok) {
+                 // 에러 발생 시 IP 정보를 hint에 포함하기 위해 json 객체를 넘김
+                 if (json.currentIp) json.currentIp = json.currentIp;
                  throw new Error(formatErrorData(json));
             }
 
@@ -218,7 +220,8 @@ const Integration = () => {
                 details: {
                     ip: json.currentIp,
                     count: json.data?.length || 0,
-                    status: 'DEBUG MODE'
+                    status: 'DEBUG MODE',
+                    proxy: json.proxyUsed
                 }
             });
 
@@ -609,8 +612,11 @@ const Integration = () => {
                                     {testResult.details && (
                                         <div className="mt-3 pt-3 border-t border-green-200/50 flex flex-wrap gap-4 text-xs font-medium opacity-80">
                                             <span>📡 IP: {testResult.details.ip || 'Unknown'}</span>
+                                            {/* Proxy 상태 표시 */}
+                                            <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                                <Network size={12}/> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
+                                            </span>
                                             <span>🔍 발견: {testResult.details.count}건</span>
-                                            <span>📊 상태: {testResult.details.status}</span>
                                         </div>
                                     )}
                                 </div>
