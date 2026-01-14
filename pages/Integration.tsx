@@ -185,7 +185,7 @@ const Integration = () => {
 
     // [New] 하드코딩된 값으로 테스트하는 함수
     const handleDebugHardcodedTest = async () => {
-        if (!confirm("🚨 주의: 입력된 값 대신 서버에 하드코딩된(저장된) 키 값으로 테스트합니다.\n계속하시겠습니까?")) return;
+        if (!confirm("🚨 주의: 입력된 값 대신 서버에 하드코딩된 키 값과 '환경변수 프록시'로 테스트합니다.\n진행하시겠습니까?")) return;
 
         setTestLoading(true);
         setTestResult(null);
@@ -204,7 +204,7 @@ const Integration = () => {
             }
             
             // IP 정보 업데이트 (에러여도 IP는 중요함)
-            if (json.currentIp && json.currentIp !== 'Unknown') {
+            if (json.currentIp && json.currentIp !== 'Unknown' && json.currentIp !== 'IP_CHECK_FAILED') {
                 setDetectedIp(json.currentIp);
             }
 
@@ -229,7 +229,7 @@ const Integration = () => {
             console.error(e);
             setTestResult({
                 success: false,
-                message: `❌ 하드코딩 테스트 실패:\n${e.message}`
+                message: `❌ 테스트 실패:\n${e.message}`
             });
         } finally {
             setTestLoading(false);
