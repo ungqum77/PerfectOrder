@@ -35,11 +35,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // [중요] 조회할 상태 (기본값: ACCEPT)
-  const targetStatus = status || 'ACCEPT';
+  // 1. 상태값 매핑 (Status Mapping) - 친구분의 조언 반영
+  // 프론트엔드에서 실수로 'NEW'를 보내도 쿠팡 코드인 'ACCEPT'로 변환하여 처리
+  const statusMap: Record<string, string> = {
+      'NEW': 'ACCEPT',          // 결제완료
+      'PREPARING': 'INSTRUCT',  // 상품준비중 (또는 PENDING)
+      'PENDING': 'INSTRUCT',    
+      'SHIPPING': 'DEPARTURE',  // 배송지시
+      'DELIVERING': 'DELIVERING', // 배송중
+      'COMPLETED': 'FINAL_DELIVERY', // 배송완료
+      'DELIVERED': 'FINAL_DELIVERY',
+      'CANCEL': 'CANCEL',       // 취소
+      'RETURN': 'RETURN',       // 반품
+      'EXCHANGE': 'EXCHANGE'    // 교환
+  };
+
+  const rawStatus = status ? status.toUpperCase() : 'ACCEPT';
+  // 매핑 테이블에 있으면 변환값 사용, 없으면 원본 사용 (이미 올바른 코드일 수 있음)
+  const targetStatus = statusMap[rawStatus] || rawStatus;
 
   try {
-    // 1. 날짜 범위 설정 (KST 기준, 내일 날짜까지 포함하여 오늘 주문 누락 방지)
+    // 2. 날짜 범위 설정 (KST 기준, 최근 7일)
     // 서버가 UTC일 수 있으므로 한국 시간(UTC+9)으로 강제 변환
     const now = new Date();
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -63,18 +79,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const createdAtTo = fmt(tomorrowKst);
     const createdAtFrom = fmt(pastKst);
 
-    // 2. 경로 및 쿼리 파라미터 구성
+    // 3. 경로 및 쿼리 파라미터 구성
     // [중요] 쿼리 파라미터는 알파벳 순서대로 정렬되어야 HMAC 서명이 올바르게 생성됩니다.
     // createdAtFrom (c) -> createdAtTo (c) -> status (s)
     const method = 'GET';
     const path = `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`;
     const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
 
-    // 3. HMAC 서명 생성
+    // 4. HMAC 서명 생성
     const { signature, datetime } = generateSignature(method, path, query, secretKey);
 
-    // 4. 쿠팡 API 호출
+    // 5. 쿠팡 API 호출
     const url = `https://api-gateway.coupang.com${path}?${query}`;
+    
+    // 디버깅 로그 (서버 로그에서 확인 가능)
+    console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
     
     // 타임아웃 20초 설정
     const controller = new AbortController();
@@ -97,24 +116,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const errorText = await apiResponse.text();
         console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
         
+        let hint = "";
+        // 403(Forbidden) 또는 401(Unauthorized)일 경우 IP 문제일 확률이 높음
+        if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
+            hint = "⚠️ 쿠팡 API 접속 권한이 없습니다. [쿠팡 윙 > 판매자 정보 > 오픈API] 설정에서 접속하려는 곳의 IP를 등록했는지 확인하세요. (테스트용: 0.0.0.0/0)";
+        }
+
         // 에러 상세 내용을 클라이언트로 전달
         res.status(apiResponse.status).json({ 
             error: 'Coupang API Request Failed',
             details: errorText,
+            hint: hint, // 프론트엔드에서 보여줄 힌트 메시지
             targetStatus: targetStatus,
-            dateRange: { from: createdAtFrom, to: createdAtTo } // 디버깅용 날짜 범위 반환
+            dateRange: { from: createdAtFrom, to: createdAtTo }
         });
         return;
     }
 
     const data = await apiResponse.json();
     
-    // 응답에 디버그 정보 추가
     const responseWithDebug = {
         ...data,
         debugInfo: {
             dateRange: { from: createdAtFrom, to: createdAtTo },
-            targetStatus
+            targetStatus,
+            mappedFrom: status || 'default'
         }
     };
 

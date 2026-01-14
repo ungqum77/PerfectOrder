@@ -96,15 +96,18 @@ export const marketApi = {
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
                         console.warn(`[Coupang Sync] ${status} 조회 실패:`, err);
-                        // 날짜 범위 확인 로그
-                        if (err.dateRange) {
-                            console.log(`[Debug] 사용된 날짜 범위: ${err.dateRange.from} ~ ${err.dateRange.to}`);
+                        
+                        // [중요] IP 차단(403)이나 권한 오류(401)는 빈 배열로 무시하지 않고 에러를 던져야 함
+                        if (res.status === 403 || res.status === 401) {
+                            const errorMsg = err.hint || err.details || `쿠팡 API 접근 권한 오류 (${res.status})`;
+                            throw new Error(errorMsg);
                         }
-                        return []; // 실패 시 해당 상태는 빈 배열 처리
+                        
+                        // 그 외 일시적 오류는 로그만 남기고 빈 배열 반환 (전체 동기화가 멈추지 않도록)
+                        return []; 
                     }
                     const json = await res.json();
                     
-                    // 디버그 정보 출력 (첫 번째 성공 응답에서만 출력하도록 조건부 가능하지만 여기선 다 찍음)
                     if (json.debugInfo) {
                         console.log(`[Coupang Sync] ${status} 조회 범위: ${json.debugInfo.dateRange.from} ~ ${json.debugInfo.dateRange.to} (KST)`);
                     }
@@ -164,7 +167,8 @@ export const marketApi = {
 
         } catch (e: any) {
             console.error("쿠팡 연동 치명적 오류:", e.message);
-            throw e; // 상위로 에러 전파하여 UI에 표시
+            // 에러를 던져서 상위 컴포넌트(Header)가 Alert를 띄우게 함
+            throw e; 
         }
     },
 
@@ -184,9 +188,9 @@ export const marketApi = {
                 try {
                     const orders = await marketApi.fetchCoupangOrders(cred);
                     allOrders = [...allOrders, ...orders];
-                } catch (e) {
-                    console.error(`쿠팡(${cred.accountName}) 동기화 중 오류 발생`);
-                    throw new Error(`쿠팡 연동 실패: 접속 정보를 확인해주세요.`);
+                } catch (e: any) {
+                    console.error(`쿠팡(${cred.accountName}) 동기화 실패:`, e.message);
+                    throw new Error(`쿠팡 연동 실패 (${cred.accountName}):\n${e.message}`);
                 }
             }
         }
