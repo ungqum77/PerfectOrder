@@ -226,6 +226,7 @@ export const mockSupabase = {
             const { data, error } = await supabase.from('market_accounts').select('*').eq('user_id', userId);
             
             if (error) {
+                // 테이블이 없을 때(42P01) 조용히 빈 배열 반환 (사용자 경험 고려)
                 console.error("DB Fetch Error:", error);
                 return [];
             }
@@ -259,18 +260,23 @@ export const mockSupabase = {
         // [New V3 Logic] 단순 Insert + 중복 검사
         saveSimple: async (account: MarketAccount): Promise<{ success: boolean; message?: string }> => {
             if (!isSupabaseConfigured() || !supabase) {
-                return { success: false, message: "DB가 연결되지 않았습니다." };
+                return { success: false, message: "DB 클라이언트가 초기화되지 않았습니다. (Code: CLIENT_ERR)" };
             }
 
             // 1. 유저 확인
             const { data: { user } } = await supabase.auth.getUser();
-            const userId = user?.id || mockSupabase.auth.getSession()?.id;
+            let userId = user?.id || mockSupabase.auth.getSession()?.id;
+            
+            // 만약 유저 정보를 못 가져왔다면 세션 한번 더 확인
+            if (!userId) {
+                 const session = await supabase.auth.getSession();
+                 userId = session.data.session?.user?.id;
+            }
 
             if (!userId) return { success: false, message: "로그인이 필요합니다." };
 
-            // 2. 데이터 준비 (Mapping Flat Columns) & Sanitization
+            // 2. 데이터 준비 & Sanitization (Integration.tsx에서도 하지만 한번 더 수행)
             const creds = account.credentials;
-            // [강력한 정제 로직] UI와 로직 일치 (백엔드 방어)
             const clean = (value: string) => {
                 if (!value) return "";
                 return value
@@ -287,7 +293,7 @@ export const mockSupabase = {
             let key1 = clean(creds.accessKey || creds.apiKey || creds.clientId);
             let key2 = clean(creds.secretKey || creds.clientSecret || creds.password);
 
-            // 플랫폼별 키 매핑 보정 (한 번 더 확실하게)
+            // 플랫폼별 키 매핑 보정
             switch (account.marketType) {
                 case 'NAVER': 
                     key1 = clean(creds.clientId); 
@@ -314,9 +320,13 @@ export const mockSupabase = {
                 .select('account_name, access_key, vendor_id, market_type')
                 .eq('user_id', userId);
 
+            // [Error Handling] 테이블이 없으면 여기서 42P01 에러가 발생
             if (fetchError) {
-                console.error(fetchError);
-                return { success: false, message: "중복 검사 중 오류가 발생했습니다." };
+                console.error("Fetch Error:", fetchError);
+                if (fetchError.code === '42P01') {
+                     return { success: false, message: "DB 테이블(market_accounts)이 없습니다. 제공된 SQL 스크립트를 Supabase SQL Editor에서 실행해주세요." };
+                }
+                return { success: false, message: `중복 검사 오류: ${fetchError.message}` };
             }
             
             if (existingList) {
@@ -334,10 +344,10 @@ export const mockSupabase = {
                 }
             }
 
-            // 4. Payload 구성
+            // 4. Payload 구성 (user_id 명시적 포함)
             const payload = {
                 id: account.id || generateUUID(),
-                user_id: userId,
+                user_id: userId, // 여기서 주입해야 NOT NULL 에러 방지
                 market_type: account.marketType,
                 account_name: accountName,
                 is_active: true,
@@ -352,9 +362,12 @@ export const mockSupabase = {
 
             if (insertError) {
                 console.error("DB Insert Error Details:", insertError);
+                 if (insertError.code === '42P01') {
+                     return { success: false, message: "DB 테이블(market_accounts)이 존재하지 않습니다. SQL Editor에서 테이블을 생성해주세요." };
+                }
                 return { 
                     success: false, 
-                    message: `저장 실패 [${insertError.code}]: ${insertError.message} ${insertError.details ? `(${insertError.details})` : ''}` 
+                    message: `저장 실패 [${insertError.code}]: ${insertError.message}` 
                 };
             }
 

@@ -73,12 +73,13 @@ const MARKETS: MarketInfo[] = [
     },
 ];
 
-// [Core Logic] 강력한 데이터 정제 함수
-const sanitizeInput = (value: string) => {
+// [Core Logic] 강력한 데이터 정제 함수 (sanitizeCredential)
+// API Key 복사/붙여넣기 시 포함되는 보이지 않는 문자(ZWSP)와 공백을 제거합니다.
+const sanitizeCredential = (value: string) => {
     if (!value) return "";
     return value
         .normalize("NFKC") // 1. 유니코드 정규화
-        .replace(/[\u200B-\u200D\uFEFF]/g, "") // 2. 투명 문자 제거
+        .replace(/[\u200B-\u200D\uFEFF]/g, "") // 2. 투명 문자(Zero Width Space 등) 제거
         .replace(/\u00A0/g, " ") // 3. NBSP 제거
         .replace(/[\r\n\t\u2028\u2029]/g, "") // 4. 줄바꿈 제거
         .replace(/\s+/g, "") // 5. 모든 공백 제거 (Key는 공백이 없어야 함)
@@ -158,7 +159,7 @@ const Integration = () => {
 
     // [Handler] 입력 시 실시간 정제
     const handleCredentialChange = (key: string, value: string) => {
-        const cleanValue = sanitizeInput(value);
+        const cleanValue = sanitizeCredential(value);
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
     };
 
@@ -166,7 +167,7 @@ const Integration = () => {
     const handleCredentialPaste = (e: React.ClipboardEvent, key: string) => {
         e.preventDefault(); 
         const text = e.clipboardData.getData('text/plain');
-        const cleanText = sanitizeInput(text);
+        const cleanText = sanitizeCredential(text);
         setFormCredentials(prev => ({ ...prev, [key]: cleanText }));
     };
 
@@ -192,7 +193,7 @@ const Integration = () => {
 
             currentMarket?.fields.forEach(field => {
                 const val = formCredentials[field.key] || "";
-                const cleanVal = sanitizeInput(val); 
+                const cleanVal = sanitizeCredential(val); 
                 if (!cleanVal) throw new Error(`${field.label}을(를) 입력해주세요.`);
                 cleanCredentials[field.key] = cleanVal;
             });
