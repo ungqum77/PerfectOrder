@@ -61,6 +61,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const rawStatus = status ? status.toUpperCase() : 'ACCEPT';
   const targetStatus = statusMap[rawStatus] || rawStatus;
 
+  // 4. Proxy Agent 설정 (IP 확인을 위해 API 호출 전 설정)
+  const proxyUrl = process.env.FIXED_IP_PROXY_URL;
+  let agent: any = undefined;
+
+  if (proxyUrl) {
+      console.log(`🚀 Proxy 사용 중: ${maskUrl(proxyUrl)}`);
+      agent = new HttpsProxyAgent(proxyUrl);
+  } else {
+      console.log("✈️ Direct 연결 중 (Proxy 없음)");
+  }
+
+  // [New] 현재 요청이 나가는 IP 확인 (성공/실패 상관없이 항상 반환하기 위함)
+  let currentIp = "Unknown";
+  try {
+      const ipRes = await fetch('https://api.ipify.org?format=json', { agent });
+      const ipData: any = await ipRes.json();
+      currentIp = ipData.ip;
+  } catch (e) {
+      console.error("IP check failed:", e);
+  }
+
   try {
     // 2. 날짜 범위 설정 (KST 기준)
     const now = new Date();
@@ -91,22 +112,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { signature, datetime } = generateSignature(method, path, query, cleanSecretKey);
     const url = `https://api-gateway.coupang.com${path}?${query}`;
 
-    // 4. Proxy Agent 설정 (핵심 로직)
-    const proxyUrl = process.env.FIXED_IP_PROXY_URL;
-    let agent: any = undefined;
-
-    if (proxyUrl) {
-        console.log(`🚀 Proxy 사용 중: ${maskUrl(proxyUrl)}`);
-        agent = new HttpsProxyAgent(proxyUrl);
-    } else {
-        console.log("✈️ Direct 연결 중 (Proxy 없음)");
-    }
-
     // 5. 쿠팡 API 호출
     console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
-    
-    // node-fetch v2는 AbortController 지원이 제한적일 수 있으므로 타임아웃은 fetch 옵션이나 별도 처리 필요하지만
-    // Vercel 함수 자체 타임아웃(10초)이 있으므로 여기서는 간단히 처리
     
     const apiResponse = await fetch(url, {
         method: method,
@@ -116,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'X-Requested-By': cleanVendorId,
             'X-Cou-Date': datetime
         },
-        agent: agent // node-fetch v2 지원 옵션
+        agent: agent 
     });
 
     if (!apiResponse.ok) {
@@ -124,26 +131,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
         
         let hint = "";
-        let currentIp = "";
 
-        // 403/401 에러 시 현재 IP 조회
+        // 403/401 에러 시 힌트 생성
         if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
-            try {
-                // 현재 IP 확인 요청
-                const ipRes = await fetch('https://api.ipify.org?format=json', {
-                    agent: agent
-                });
-                const ipData: any = await ipRes.json();
-                currentIp = ipData.ip;
-                
-                if (proxyUrl) {
-                    hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
-                } else {
-                    hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록하거나, 고정 IP 프록시를 설정하세요.`;
-                }
-            } catch (e) {
-                console.error("IP check failed", e);
-                hint = "⚠️ [접속 권한 오류] 쿠팡 윙에 등록된 IP와 현재 서버 IP가 일치하지 않습니다.";
+            if (proxyUrl) {
+                hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
+            } else {
+                hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록하거나, 고정 IP 프록시를 설정하세요.`;
             }
         }
 
@@ -151,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             error: 'Coupang API Request Failed',
             details: errorText,
             hint: hint, 
-            currentIp: currentIp,
+            currentIp: currentIp, // 항상 IP 반환
             targetStatus: targetStatus,
             dateRange: { from: createdAtFrom, to: createdAtTo }
         });
@@ -162,11 +156,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     
     const responseWithDebug = {
         ...data,
+        currentIp: currentIp, // 성공 시에도 IP 반환
         debugInfo: {
             dateRange: { from: createdAtFrom, to: createdAtTo },
             targetStatus,
             mappedFrom: status || 'default',
-            usingProxy: !!proxyUrl
+            usingProxy: !!proxyUrl,
+            httpStatus: apiResponse.status // HTTP 상태 코드 반환
         }
     };
 
@@ -174,7 +170,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error: any) {
     console.error(`Server Error (${targetStatus}):`, error);
-    res.status(500).json({ error: error.message || 'Internal Server Error', targetStatus });
+    res.status(500).json({ 
+        error: error.message || 'Internal Server Error', 
+        targetStatus,
+        currentIp: currentIp 
+    });
   }
 }
 
