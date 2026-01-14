@@ -1,15 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
+import fetch from 'node-fetch'; // Proxy Agent 호환성을 위해 node-fetch 사용
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
-// Vercel Serverless Function 설정 (Node.js 런타임 및 타임아웃)
+// Vercel Serverless Function 설정
 export const config = {
-  maxDuration: 10, // 초 단위
+  maxDuration: 10,
 };
 
 /**
  * Vercel Serverless Function for Coupang API Proxy
- * 프론트엔드에서의 CORS 에러를 방지하고, Secret Key를 안전하게 사용하여 API를 호출합니다.
- * HMAC 서명 생성 규칙 준수: https://developers.coupang.com/hc/en-us/articles/360033660894-Generate-HMAC-signature
+ * 환경변수 FIXED_IP_PROXY_URL이 설정되어 있으면 해당 프록시를 통해 요청을 보냅니다.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS 설정
@@ -21,13 +22,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
   );
 
-  // OPTIONS 요청 처리
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  // POST 요청만 허용
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
@@ -35,36 +34,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { vendorId, accessKey, secretKey, status } = req.body;
 
-  // [중요] 서버 사이드 데이터 정제 (Trim)
-  // 사용자가 복사/붙여넣기 할 때 포함된 공백을 강제로 제거합니다.
   const cleanVendorId = vendorId ? String(vendorId).trim() : '';
   const cleanAccessKey = accessKey ? String(accessKey).trim() : '';
   const cleanSecretKey = secretKey ? String(secretKey).trim() : '';
 
   if (!cleanVendorId || !cleanAccessKey || !cleanSecretKey) {
-    res.status(400).json({ error: 'Missing required credentials (vendorId, accessKey, secretKey)' });
+    res.status(400).json({ error: 'Missing required credentials' });
     return;
   }
 
-  // 1. 상태값 매핑 (Status Mapping)
+  // 1. 상태값 매핑
   const statusMap: Record<string, string> = {
-      'NEW': 'ACCEPT',          // 결제완료
-      'PREPARING': 'INSTRUCT',  // 상품준비중
+      'NEW': 'ACCEPT',
+      'PREPARING': 'INSTRUCT',
       'PENDING': 'INSTRUCT',    
-      'SHIPPING': 'DEPARTURE',  // 배송지시
-      'DELIVERING': 'DELIVERING', // 배송중
-      'COMPLETED': 'FINAL_DELIVERY', // 배송완료
+      'SHIPPING': 'DEPARTURE',
+      'DELIVERING': 'DELIVERING',
+      'COMPLETED': 'FINAL_DELIVERY',
       'DELIVERED': 'FINAL_DELIVERY',
-      'CANCEL': 'CANCEL',       // 취소
-      'RETURN': 'RETURN',       // 반품
-      'EXCHANGE': 'EXCHANGE'    // 교환
+      'CANCEL': 'CANCEL',
+      'RETURN': 'RETURN',
+      'EXCHANGE': 'EXCHANGE'
   };
 
   const rawStatus = status ? status.toUpperCase() : 'ACCEPT';
   const targetStatus = statusMap[rawStatus] || rawStatus;
 
   try {
-    // 2. 날짜 범위 설정 (KST 기준, 최근 7일)
+    // 2. 날짜 범위 설정 (KST 기준)
     const now = new Date();
     const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
     const kstGap = 9 * 60 * 60 * 1000;
@@ -86,21 +83,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const createdAtTo = fmt(tomorrowKst);
     const createdAtFrom = fmt(pastKst);
 
-    // 3. 경로 및 쿼리 파라미터 구성
+    // 3. 경로 및 서명 생성
     const method = 'GET';
     const path = `/v2/providers/openapi/apis/api/v4/vendors/${cleanVendorId}/ordersheets`;
     const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
-
-    // 4. HMAC 서명 생성
     const { signature, datetime } = generateSignature(method, path, query, cleanSecretKey);
+    const url = `https://api-gateway.coupang.com${path}?${query}`;
+
+    // 4. Proxy Agent 설정 (핵심 로직)
+    const proxyUrl = process.env.FIXED_IP_PROXY_URL;
+    let agent: any = undefined;
+
+    if (proxyUrl) {
+        console.log(`🚀 Proxy 사용 중: ${maskUrl(proxyUrl)}`);
+        agent = new HttpsProxyAgent(proxyUrl);
+    } else {
+        console.log("✈️ Direct 연결 중 (Proxy 없음)");
+    }
 
     // 5. 쿠팡 API 호출
-    const url = `https://api-gateway.coupang.com${path}?${query}`;
-    
     console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15초 타임아웃
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const apiResponse = await fetch(url, {
         method: method,
@@ -110,7 +115,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'X-Requested-By': cleanVendorId,
             'X-Cou-Date': datetime
         },
-        signal: controller.signal
+        agent: agent, // node-fetch의 agent 옵션 사용
+        signal: controller.signal as any // Type casting for node-fetch compatibility
     });
 
     clearTimeout(timeoutId);
@@ -122,14 +128,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let hint = "";
         let currentIp = "";
 
-        // 403/401 에러 상세 가이드 + 현재 서버 IP 조회
+        // 403/401 에러 시 현재 IP 조회 (프록시가 있다면 프록시 IP가 조회됨)
         if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
             try {
-                // 현재 실행중인 서버(Vercel)의 IP 확인
-                const ipRes = await fetch('https://api.ipify.org?format=json');
-                const ipData = await ipRes.json();
+                const ipRes = await fetch('https://api.ipify.org?format=json', {
+                    agent: agent // 동일한 조건(Proxy 유무)으로 IP 확인
+                });
+                const ipData: any = await ipRes.json();
                 currentIp = ipData.ip;
-                hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록해주세요.`;
+                
+                if (proxyUrl) {
+                    hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
+                } else {
+                    hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록하거나, 고정 IP 프록시를 설정하세요.`;
+                }
             } catch (e) {
                 console.error("IP check failed", e);
                 hint = "⚠️ [접속 권한 오류] 쿠팡 윙에 등록된 IP와 현재 서버 IP가 일치하지 않습니다.";
@@ -140,7 +152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             error: 'Coupang API Request Failed',
             details: errorText,
             hint: hint, 
-            currentIp: currentIp, // 감지된 IP 전달
+            currentIp: currentIp,
             targetStatus: targetStatus,
             dateRange: { from: createdAtFrom, to: createdAtTo }
         });
@@ -154,7 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         debugInfo: {
             dateRange: { from: createdAtFrom, to: createdAtTo },
             targetStatus,
-            mappedFrom: status || 'default'
+            mappedFrom: status || 'default',
+            usingProxy: !!proxyUrl
         }
     };
 
@@ -179,4 +192,13 @@ function generateSignature(method: string, path: string, query: string, secretKe
     const signature = hmac.digest('hex');
 
     return { signature, datetime: coupangDate };
+}
+
+function maskUrl(url: string) {
+    try {
+        const u = new URL(url);
+        return `${u.protocol}//${u.host}`; // 인증 정보 숨김
+    } catch {
+        return 'Invalid URL';
+    }
 }
