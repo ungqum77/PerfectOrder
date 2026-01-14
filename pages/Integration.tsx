@@ -102,6 +102,7 @@ const Integration = () => {
     const [formAlias, setFormAlias] = useState('');
     const [formCredentials, setFormCredentials] = useState<Record<string, string>>({});
     const [dbAuthUser, setDbAuthUser] = useState<any>(null);
+    const [detectedIp, setDetectedIp] = useState<string | null>(null);
 
     useEffect(() => {
         loadAccounts();
@@ -128,6 +129,7 @@ const Integration = () => {
         setFormAlias('');
         setFormCredentials({});
         setTestResult(null);
+        setDetectedIp(null);
         setIsModalOpen(true);
     };
 
@@ -135,6 +137,7 @@ const Integration = () => {
         const cleanValue = sanitizeCredential(value);
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
         setTestResult(null); 
+        setDetectedIp(null);
     };
 
     const handleCredentialPaste = (e: React.ClipboardEvent, key: string) => {
@@ -145,14 +148,17 @@ const Integration = () => {
     };
 
     const handleCopyIp = () => {
-        navigator.clipboard.writeText("0.0.0.0");
-        alert("IP 설정값(0.0.0.0)이 복사되었습니다.\n쿠팡 윙 'IP 주소' 란에 붙여넣기 하세요.");
+        if(detectedIp) {
+            navigator.clipboard.writeText(detectedIp);
+            alert(`서버 IP [${detectedIp}]가 복사되었습니다.\n쿠팡 윙에 붙여넣기 하세요.`);
+        }
     };
 
     const handleTestConnection = async (e: React.MouseEvent) => {
         e.preventDefault();
         setTestLoading(true);
         setTestResult(null);
+        setDetectedIp(null);
 
         try {
             const tempAccount: MarketAccount = {
@@ -177,8 +183,13 @@ const Integration = () => {
             console.error("Test Connection Error:", error);
             let errorMsg = error.message;
             if (errorMsg.includes("404")) errorMsg += "\n(API 경로를 찾을 수 없습니다. Vercel 배포 환경인지 확인해주세요)";
-            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 쿠팡 윙에서 0.0.0.0을 허용했는지 확인하세요)";
+            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 서버 IP를 확인하여 등록해주세요)";
             
+            // [중요] 백엔드에서 전달받은 감지된 IP가 있으면 상태 업데이트
+            if (error.currentIp) {
+                setDetectedIp(error.currentIp);
+            }
+
             setTestResult({ success: false, message: errorMsg });
         } finally {
             setTestLoading(false);
@@ -375,28 +386,36 @@ const Integration = () => {
                         </div>
                         
                         <div className="overflow-y-auto flex-1 p-8 space-y-5">
-                            {/* [IP Guide] 쿠팡 전용 IP 가이드 */}
+                            {/* [IP Guide] 쿠팡 전용 IP 가이드 (상황에 따라 동적 표시) */}
                             {currentMarket.ipGuide && (
-                                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
+                                <div className={`border rounded-xl p-4 mb-4 transition-colors ${detectedIp ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-100'}`}>
                                     <div className="flex items-start gap-3">
-                                        <div className="p-1 bg-blue-100 rounded text-blue-600 mt-0.5"><Info size={16} /></div>
-                                        <div>
-                                            <h5 className="text-sm font-bold text-blue-800 mb-1">고정 IP 설정 안내 (중요)</h5>
-                                            <p className="text-xs text-blue-700 leading-relaxed mb-3">
-                                                현재 사용중인 시스템(Vercel)은 클라우드 특성상 IP가 수시로 변경됩니다.<br/>
-                                                따라서 쿠팡 윙 API 설정에서 특정 IP 대신 <strong>전체 허용</strong> 설정을 사용해야 정상적으로 주문을 가져올 수 있습니다.<br/>
-                                                (Tip: 뒤에 붙는 /0 을 제거하고 0.0.0.0 만 입력하세요)
+                                        <div className={`p-1 rounded mt-0.5 ${detectedIp ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                            {detectedIp ? <AlertTriangle size={16} /> : <Info size={16} />}
+                                        </div>
+                                        <div className="flex-1">
+                                            <h5 className={`text-sm font-bold mb-1 ${detectedIp ? 'text-red-800' : 'text-blue-800'}`}>
+                                                {detectedIp ? '접속 차단됨: 아래 IP를 등록해주세요' : '동적 IP 설정 안내'}
+                                            </h5>
+                                            <p className={`text-xs leading-relaxed mb-3 ${detectedIp ? 'text-red-700' : 'text-blue-700'}`}>
+                                                클라우드(Vercel) 환경 특성상 IP가 수시로 변경됩니다. 
+                                                {!detectedIp && <br/>}
+                                                {!detectedIp && <strong>[연동 테스트]</strong>}
+                                                {!detectedIp && '를 진행하면 현재 할당된 IP를 확인할 수 있습니다. 에러 발생 시 표시되는 IP를 등록해주세요.'}
+                                                {detectedIp && '아래 감지된 IP를 복사하여 쿠팡 윙 API 설정에 등록한 후 다시 시도해주세요.'}
                                             </p>
-                                            <div className="flex items-center gap-2 bg-white rounded-lg border border-blue-200 p-2">
-                                                <code className="flex-1 font-mono text-sm font-bold text-slate-700 text-center">0.0.0.0</code>
-                                                <button 
-                                                    onClick={handleCopyIp}
-                                                    className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-bold rounded-md transition-colors flex items-center gap-1"
-                                                >
-                                                    <Copy size={12} /> 복사
-                                                </button>
-                                            </div>
-                                            <p className="text-[10px] text-blue-500 mt-2">* IP 설정 반영까지 최대 1시간이 소요될 수 있습니다.</p>
+                                            
+                                            {detectedIp && (
+                                                <div className="flex items-center gap-2 bg-white rounded-lg border border-red-200 p-2 animate-pulse">
+                                                    <code className="flex-1 font-mono text-sm font-bold text-slate-800 text-center">{detectedIp}</code>
+                                                    <button 
+                                                        onClick={handleCopyIp}
+                                                        className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-md transition-colors flex items-center gap-1"
+                                                    >
+                                                        <Copy size={12} /> 복사
+                                                    </button>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

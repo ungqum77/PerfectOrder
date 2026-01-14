@@ -120,15 +120,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
         
         let hint = "";
-        // 403/401 에러 상세 가이드
+        let currentIp = "";
+
+        // 403/401 에러 상세 가이드 + 현재 서버 IP 조회
         if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
-            hint = "⚠️ [접속 권한 오류] IP 차단 또는 키 정보가 잘못되었습니다.\n\n1. 쿠팡 윙에서 IP(0.0.0.0)를 등록했는지 확인하세요.\n2. IP 등록 직후라면 최대 1시간 정도 반영 시간이 걸릴 수 있습니다.\n3. Vendor ID와 Access/Secret Key에 공백이 없는지 확인하세요.";
+            try {
+                // 현재 실행중인 서버(Vercel)의 IP 확인
+                const ipRes = await fetch('https://api.ipify.org?format=json');
+                const ipData = await ipRes.json();
+                currentIp = ipData.ip;
+                hint = `⚠️ [접속 권한 오류] IP 차단 문제입니다.\n아래 감지된 서버 IP [${currentIp}]를 쿠팡 윙에 등록해주세요.`;
+            } catch (e) {
+                console.error("IP check failed", e);
+                hint = "⚠️ [접속 권한 오류] 쿠팡 윙에 등록된 IP와 현재 서버 IP가 일치하지 않습니다.";
+            }
         }
 
         res.status(apiResponse.status).json({ 
             error: 'Coupang API Request Failed',
             details: errorText,
             hint: hint, 
+            currentIp: currentIp, // 감지된 IP 전달
             targetStatus: targetStatus,
             dateRange: { from: createdAtFrom, to: createdAtTo }
         });
