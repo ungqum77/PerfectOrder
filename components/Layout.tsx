@@ -127,7 +127,7 @@ const Sidebar = () => {
         
         {/* Version Info */}
         <div className="text-center">
-            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.7 (Real API)</p>
+            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.8 (Axios & Today)</p>
         </div>
       </div>
     </aside>
@@ -165,10 +165,10 @@ const Header = ({ title }: { title: string }) => {
         const count = await mockSupabase.db.orders.syncExternalOrders();
         // 동기화 완료 메시지 개선
         if (count > 0) {
-            alert(`동기화 완료!\n최근 7일간의 데이터에서 ${count}건의 새로운 주문을 가져왔습니다.`);
+            alert(`동기화 완료!\n오늘의 데이터에서 ${count}건의 새로운 주문을 가져왔습니다.`);
             window.location.reload();
         } else {
-            alert("동기화 완료!\n최근 7일간 새로운 주문(또는 변경된 상태)이 없습니다.");
+            alert("동기화 완료!\n오늘 새로운 주문(또는 변경된 상태)이 없습니다.");
         }
     } catch (e: any) {
         console.error(e);
@@ -220,7 +220,7 @@ const Header = ({ title }: { title: string }) => {
             className="flex items-center justify-center gap-2 rounded-lg h-10 px-4 bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200 disabled:opacity-70 disabled:cursor-wait"
         >
           <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
-          <span>{isSyncing ? '동기화 중...' : '동기화'}</span>
+          <span>{isSyncing ? '오늘 주문 동기화' : '오늘 주문 동기화'}</span>
         </button>
       </div>
     </header>

@@ -1,19 +1,13 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import fetch from 'node-fetch';
+import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
-// Vercel Serverless Function 설정
 export const config = {
   maxDuration: 10,
 };
 
-/**
- * Vercel Serverless Function for Coupang API Proxy
- * 환경변수 FIXED_IP_PROXY_URL이 설정되어 있으면 해당 프록시를 통해 요청을 보냅니다.
- */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS 설정
   res.setHeader('Access-Control-Allow-Credentials', "true");
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
@@ -63,41 +57,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // 4. Proxy Agent 설정
       const proxyUrl = process.env.FIXED_IP_PROXY_URL;
-      let agent: any = undefined;
+      let httpsAgent: any = undefined;
 
       if (proxyUrl) {
           try {
             console.log(`🚀 Proxy 사용 중: ${maskUrl(proxyUrl)}`);
-            agent = new HttpsProxyAgent(proxyUrl);
+            httpsAgent = new HttpsProxyAgent(proxyUrl);
           } catch (agentError) {
              console.error("Proxy Agent Creation Failed:", agentError);
-             // Agent 생성 실패시 agent 없이 진행 시도하거나 에러 처리
           }
-      } else {
-          console.log("✈️ Direct 연결 중 (Proxy 없음)");
       }
 
       // [IP 확인]
       let currentIp = "Unknown";
       try {
-          const ipRes = await fetch('https://api.ipify.org?format=json', { agent });
-          const ipData: any = await ipRes.json();
-          currentIp = ipData.ip;
+          const ipRes = await axios.get('https://api.ipify.org?format=json', {
+              httpsAgent: httpsAgent,
+              proxy: false 
+          });
+          currentIp = ipRes.data.ip;
       } catch (e) {
           console.error("IP check failed:", e);
       }
 
       // 2. 날짜 범위 설정 (KST 기준)
+      // "Today's new orders" 요청에 맞춰 조회 범위를 오늘(Today)로 설정
       const now = new Date();
       const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
       const kstGap = 9 * 60 * 60 * 1000;
       const nowKst = new Date(utc + kstGap);
 
+      // 오늘부터 내일까지 (1일간)
       const tomorrowKst = new Date(nowKst);
       tomorrowKst.setDate(tomorrowKst.getDate() + 1); 
-
-      const pastKst = new Date(nowKst);
-      pastKst.setDate(pastKst.getDate() - 7); 
 
       const fmt = (d: Date) => {
           const y = d.getFullYear();
@@ -106,8 +98,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return `${y}-${m}-${day}`;
       };
 
-      const createdAtTo = fmt(tomorrowKst);
-      const createdAtFrom = fmt(pastKst);
+      const createdAtTo = req.body.createdAtTo || fmt(tomorrowKst);
+      // 기본값: 오늘 (기존 -7일에서 변경됨)
+      const createdAtFrom = req.body.createdAtFrom || fmt(nowKst);
 
       // 3. 경로 및 서명 생성
       const method = 'GET';
@@ -116,26 +109,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { signature, datetime } = generateSignature(method, path, query, cleanSecretKey);
       const url = `https://api-gateway.coupang.com${path}?${query}`;
 
-      // 5. 쿠팡 API 호출
+      // 5. 쿠팡 API 호출 (Axios 사용)
       console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
       
-      const apiResponse = await fetch(url, {
+      const apiResponse = await axios({
           method: method,
+          url: url,
           headers: {
               'Content-Type': 'application/json',
               'Authorization': `HMAC-SHA256 ${cleanAccessKey}:${signature}`,
               'X-Requested-By': cleanVendorId,
               'X-Cou-Date': datetime
           },
-          agent: agent 
+          httpsAgent: httpsAgent,
+          proxy: false,
+          validateStatus: () => true
       });
 
-      if (!apiResponse.ok) {
-          const errorText = await apiResponse.text();
+      if (apiResponse.status >= 400) {
+          const errorData = apiResponse.data;
+          const errorText = typeof errorData === 'object' ? JSON.stringify(errorData) : String(errorData);
+          
           console.error(`Coupang API Error (${targetStatus}): ${apiResponse.status} - ${errorText}`);
           
           let hint = "";
-          if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
+          if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied") || errorText.includes("ACL")) {
                if (proxyUrl) {
                   hint = `⚠️ [프록시 접속 차단] 고정 IP(${currentIp})가 쿠팡 윙에 등록되어 있는지 확인해주세요.`;
               } else {
@@ -153,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return;
       }
 
-      const data = await apiResponse.json();
+      const data = apiResponse.data;
       
       const responseWithDebug = {
           ...data,
@@ -171,10 +169,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error: any) {
     console.error(`Server Error:`, error);
-    // 핸들러 내부 크래시 방지 및 JSON 응답 보장
     res.status(500).json({ 
         error: 'Internal Server Error', 
-        details: error.message,
+        details: error.message || "Unknown Error",
         currentIp: 'Unknown'
     });
   }
