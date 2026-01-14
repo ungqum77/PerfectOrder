@@ -127,7 +127,7 @@ const Sidebar = () => {
         
         {/* Version Info */}
         <div className="text-center">
-            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.6 (Auto-Sync)</p>
+            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.7 (Real API)</p>
         </div>
       </div>
     </aside>
@@ -163,15 +163,16 @@ const Header = ({ title }: { title: string }) => {
     setIsSyncing(true);
     try {
         const count = await mockSupabase.db.orders.syncExternalOrders();
+        // 동기화 완료 메시지 개선
         if (count > 0) {
-            alert(`${count}건의 신규 주문을 가져왔습니다.`);
+            alert(`동기화 완료!\n최근 7일간의 데이터에서 ${count}건의 새로운 주문을 가져왔습니다.`);
             window.location.reload();
         } else {
-            alert("신규 주문이 없습니다.");
+            alert("동기화 완료!\n최근 7일간 새로운 주문(또는 변경된 상태)이 없습니다.");
         }
-    } catch (e) {
+    } catch (e: any) {
         console.error(e);
-        alert("동기화 중 오류가 발생했습니다.");
+        alert(`동기화 중 오류가 발생했습니다.\n${e.message}`);
     } finally {
         setIsSyncing(false);
     }

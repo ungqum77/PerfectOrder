@@ -83,6 +83,8 @@ export const marketApi = {
         const targetStatuses = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
         let allCoupangOrders: Order[] = [];
 
+        console.log(`[Coupang Sync] '${credential.accountName}' 계정 동기화 시작`);
+
         try {
             // 병렬로 모든 상태 호출
             const requests = targetStatuses.map(status => 
@@ -92,11 +94,23 @@ export const marketApi = {
                     body: JSON.stringify({ vendorId, accessKey, secretKey, status })
                 }).then(async (res) => {
                     if (!res.ok) {
-                        const err = await res.text();
-                        console.warn(`쿠팡 ${status} 조회 실패: ${err}`);
-                        return []; // 실패 시 해당 상태는 빈 배열 처리 (전체 실패 방지)
+                        const err = await res.json().catch(() => ({}));
+                        console.warn(`[Coupang Sync] ${status} 조회 실패:`, err);
+                        // 날짜 범위 확인 로그
+                        if (err.dateRange) {
+                            console.log(`[Debug] 사용된 날짜 범위: ${err.dateRange.from} ~ ${err.dateRange.to}`);
+                        }
+                        return []; // 실패 시 해당 상태는 빈 배열 처리
                     }
                     const json = await res.json();
+                    
+                    // 디버그 정보 출력 (첫 번째 성공 응답에서만 출력하도록 조건부 가능하지만 여기선 다 찍음)
+                    if (json.debugInfo) {
+                        console.log(`[Coupang Sync] ${status} 조회 범위: ${json.debugInfo.dateRange.from} ~ ${json.debugInfo.dateRange.to} (KST)`);
+                    }
+
+                    const count = json.data?.length || 0;
+                    console.log(`[Coupang Sync] ${status}: ${count}건 발견`);
                     return json.data || [];
                 })
             );
@@ -145,6 +159,7 @@ export const marketApi = {
                 allCoupangOrders = [...allCoupangOrders, ...mappedOrders];
             });
 
+            console.log(`[Coupang Sync] 최종 ${allCoupangOrders.length}건 병합 완료`);
             return allCoupangOrders;
 
         } catch (e: any) {

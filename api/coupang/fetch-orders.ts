@@ -39,15 +39,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const targetStatus = status || 'ACCEPT';
 
   try {
-    // 1. 날짜 범위 설정 (최근 3일)
-    // 쿠팡 API는 조회 기간이 너무 길면 타임아웃 발생 가능
+    // 1. 날짜 범위 설정 (KST 기준, 내일 날짜까지 포함하여 오늘 주문 누락 방지)
+    // 서버가 UTC일 수 있으므로 한국 시간(UTC+9)으로 강제 변환
     const now = new Date();
-    const threeDaysAgo = new Date(now);
-    threeDaysAgo.setDate(now.getDate() - 3);
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const kstGap = 9 * 60 * 60 * 1000;
+    const nowKst = new Date(utc + kstGap);
 
-    // 날짜 포맷: YYYY-MM-DD
-    const createdAtTo = now.toISOString().split('T')[0];
-    const createdAtFrom = threeDaysAgo.toISOString().split('T')[0];
+    const tomorrowKst = new Date(nowKst);
+    tomorrowKst.setDate(tomorrowKst.getDate() + 1); // 종료일을 내일로 설정하여 오늘 23:59:59까지 커버
+
+    const pastKst = new Date(nowKst);
+    pastKst.setDate(pastKst.getDate() - 7); // 7일 전
+
+    // 포맷 헬퍼: YYYY-MM-DD
+    const fmt = (d: Date) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
+    const createdAtTo = fmt(tomorrowKst);
+    const createdAtFrom = fmt(pastKst);
 
     // 2. 경로 및 쿼리 파라미터 구성
     // [중요] 쿼리 파라미터는 알파벳 순서대로 정렬되어야 HMAC 서명이 올바르게 생성됩니다.
@@ -62,9 +76,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 4. 쿠팡 API 호출
     const url = `https://api-gateway.coupang.com${path}?${query}`;
     
-    // 타임아웃 15초 설정
+    // 타임아웃 20초 설정
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     const apiResponse = await fetch(url, {
         method: method,
@@ -88,13 +102,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             error: 'Coupang API Request Failed',
             details: errorText,
             targetStatus: targetStatus,
-            statusCode: apiResponse.status
+            dateRange: { from: createdAtFrom, to: createdAtTo } // 디버깅용 날짜 범위 반환
         });
         return;
     }
 
     const data = await apiResponse.json();
-    res.status(200).json(data);
+    
+    // 응답에 디버그 정보 추가
+    const responseWithDebug = {
+        ...data,
+        debugInfo: {
+            dateRange: { from: createdAtFrom, to: createdAtTo },
+            targetStatus
+        }
+    };
+
+    res.status(200).json(responseWithDebug);
 
   } catch (error: any) {
     console.error(`Server Error (${targetStatus}):`, error);
