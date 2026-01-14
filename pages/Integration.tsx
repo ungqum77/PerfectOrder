@@ -159,6 +159,16 @@ const Integration = () => {
 
     const handleTestConnection = async (e: React.MouseEvent) => {
         e.preventDefault();
+
+        // Vendor ID 유효성 검사 (쿠팡인 경우)
+        if (selectedPlatform === 'COUPANG') {
+            const vid = formCredentials['vendorId'] || '';
+            if (!vid.toUpperCase().startsWith('A') && !vid.toUpperCase().startsWith('C')) {
+                alert("⚠️ 업체 코드(Vendor ID) 오류\n\n쿠팡 업체 코드는 보통 'A00...' 또는 'C00...'으로 시작합니다.\n로그인 아이디를 입력하신 게 아닌지 확인해주세요.");
+                return;
+            }
+        }
+
         setTestLoading(true);
         setTestResult(null);
 
@@ -228,7 +238,6 @@ const Integration = () => {
             console.error("Test Connection Error:", error);
             let errorMsg = error.message;
             if (errorMsg.includes("404")) errorMsg += "\n(API 경로를 찾을 수 없습니다. Vercel 배포 환경인지 확인해주세요)";
-            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 상단의 감지된 IP를 등록해주세요)";
             
             if (error.currentIp) {
                 setDetectedIp(error.currentIp);

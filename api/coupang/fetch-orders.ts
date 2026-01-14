@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import CryptoJS from 'crypto-js';
+import { createHmac } from 'crypto';
 
 export const config = {
   maxDuration: 10,
@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
       const { vendorId, accessKey, secretKey, status } = req.body;
 
-      // [핵심 1] 모든 공백 제거 및 Vendor ID 대문자 강제 변환
+      // [입력값 정제] 공백 제거 및 대문자 변환
       const cleanVendorId = String(vendorId || '').replace(/\s+/g, '').toUpperCase();
       const cleanAccessKey = String(accessKey || '').replace(/\s+/g, '');
       const cleanSecretKey = String(secretKey || '').replace(/\s+/g, '');
@@ -78,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           currentIp = ipRes.data.ip;
       } catch (e) {
-          console.error("IP check failed:", e);
+          // IP 확인 실패는 치명적이지 않음
       }
 
       // 2. 날짜 범위 설정 (KST 기준)
@@ -90,7 +90,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const tomorrowKst = new Date(nowKst);
       tomorrowKst.setDate(tomorrowKst.getDate() + 1); 
 
-      // YYYY-MM-DD 형식 포맷터
       const fmt = (d: Date) => {
           const y = d.getFullYear();
           const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -101,12 +100,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const createdAtTo = req.body.createdAtTo || fmt(tomorrowKst);
       const createdAtFrom = req.body.createdAtFrom || fmt(nowKst);
 
-      // 3. 경로 및 서명 생성 (CryptoJS 사용)
+      // 3. 경로 및 서명 생성 (Node.js Native Crypto)
       const method = 'GET';
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${cleanVendorId}/ordersheets`;
+      
+      // Query String 수동 생성 (인코딩 문제 방지)
       const query = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
       
-      const { signature, datetime, message } = generateSignature(method, path, query, cleanSecretKey);
+      const { signature, datetime } = generateSignature(method, path, query, cleanSecretKey);
       const url = `https://api-gateway.coupang.com${path}?${query}`;
 
       // 5. 쿠팡 API 호출
@@ -134,13 +135,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error(`Coupang Error: ${apiResponse.status} - ${errorText}`);
           
           let hint = "";
-          // 401: Unauthorized (서명 오류, 키 오류, IP 반영 지연)
+          // 401: Unauthorized
           if (apiResponse.status === 401 || errorText.includes("Request is not authorized")) {
-             hint = `🔑 [인증 실패]\n1. 방금 IP를 등록하셨다면 **최대 10분** 정도 기다려야 반영됩니다. 잠시 후 다시 시도해주세요.\n2. Access Key와 Secret Key가 서로 바뀌지 않았는지 확인해주세요.\n3. 업체 코드(Vendor ID)가 정확한지 확인해주세요 (${cleanVendorId}).`;
+             hint = `🔑 [인증 실패] 서명 값이 일치하지 않습니다.\n1. 업체 코드(Vendor ID)가 '${cleanVendorId}'가 맞는지 확인하세요. (로그인 ID 아님)\n2. Access Key와 Secret Key가 서로 바뀌지 않았는지 확인하세요.\n3. Secret Key 복사 시 공백이 포함되지 않게 해주세요.`;
           }
-          // 403: Forbidden (IP 차단)
-          else if (apiResponse.status === 403 || errorText.includes("Access Denied") || errorText.includes("ACL")) {
-             hint = `⚠️ [접속 차단]\n감지된 서버 IP [${currentIp}]가 쿠팡 윙에 등록되어 있지 않습니다.\n등록 후 **10분 뒤**에 다시 시도해주세요.`;
+          // 403: Forbidden
+          else if (apiResponse.status === 403 || errorText.includes("Access Denied")) {
+             hint = `⚠️ [접속 차단]\n서버 IP [${currentIp}]가 쿠팡 윙에 등록되어 있지 않습니다.`;
           }
 
           res.status(apiResponse.status).json({ 
@@ -159,7 +160,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...data,
           currentIp: currentIp,
           debugInfo: {
-              dateRange: { from: createdAtFrom, to: createdAtTo },
               targetStatus,
               httpStatus: apiResponse.status
           }
@@ -177,21 +177,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// [핵심 2] 서명 생성 함수 (CryptoJS 사용으로 표준화)
+// [핵심] 서명 생성 함수 (Node.js Native)
 function generateSignature(method: string, path: string, query: string, secretKey: string) {
     const date = new Date();
     const iso = date.toISOString(); 
-    // Format: YYMMDDTHHMMSSZ
+    // Format: YYMMDDTHHMMSSZ (e.g., 230522T120000Z)
     const datetime = iso.replace(/[-:]/g, '').split('.')[0] + 'Z'; 
     const coupangDate = datetime.substring(2); 
 
     const message = coupangDate + method + path + (query ? '?' + query : '');
 
-    // NodeJS crypto 모듈 대신 crypto-js 사용 (호환성 보장)
-    const hmac = CryptoJS.HmacSHA256(message, secretKey);
-    const signature = hmac.toString(CryptoJS.enc.Hex);
+    const hmac = createHmac('sha256', secretKey);
+    hmac.update(message);
+    const signature = hmac.digest('hex');
 
-    return { signature, datetime: coupangDate, message };
+    return { signature, datetime: coupangDate };
 }
 
 function maskUrl(url: string) {
