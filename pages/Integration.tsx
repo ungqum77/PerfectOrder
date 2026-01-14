@@ -88,6 +88,32 @@ const sanitizeCredential = (value: string) => {
         .trim();
 };
 
+// [Helper] JSON 에러 응답을 읽기 좋은 문자열로 변환
+const formatErrorData = (json: any) => {
+    const errorPart = json.error || "요청 실패";
+    let detailPart = "";
+    
+    if (json.details) {
+        if (typeof json.details === 'object') {
+             // 쿠팡 에러 포맷 ({code, message}) 인 경우 보기 좋게
+             if (json.details.message) {
+                 detailPart = `Server Msg: ${json.details.message}`;
+                 if (json.details.code) detailPart = `[${json.details.code}] ${detailPart}`;
+             } else {
+                 detailPart = JSON.stringify(json.details, null, 2);
+             }
+        } else {
+            detailPart = String(json.details);
+        }
+    }
+    
+    let msg = `${errorPart}`;
+    if (detailPart) msg += `\n${detailPart}`;
+    if (json.hint) msg += `\n\n💡 힌트: ${json.hint}`;
+    
+    return msg;
+};
+
 const Integration = () => {
     const navigate = useNavigate();
     const [selectedPlatform, setSelectedPlatform] = useState<Platform>('NAVER');
@@ -168,14 +194,22 @@ const Integration = () => {
             const response = await fetch('/api/coupang/debug-test', {
                 method: 'POST', // POST or GET, endpoint uses POST usually or checks method
             });
-            const json = await response.json();
+            
+            // JSON 파싱 안전하게 처리
+            const text = await response.text();
+            let json;
+            try {
+                json = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Invalid JSON Response: ${text.substring(0, 100)}...`);
+            }
             
             if (json.currentIp) {
                 setDetectedIp(json.currentIp);
             }
 
             if (!response.ok) {
-                 throw new Error(json.details || json.error || "테스트 실패");
+                 throw new Error(formatErrorData(json));
             }
 
             setTestResult({
@@ -246,7 +280,7 @@ const Integration = () => {
                 }
 
                 if (!response.ok) {
-                    throw new Error(json.details || json.error || "연동 실패");
+                    throw new Error(formatErrorData(json));
                 }
 
                 // 성공 시 로직
