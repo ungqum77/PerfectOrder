@@ -18,7 +18,6 @@ export interface User {
   isVerified?: boolean; // 이메일 인증 여부
 }
 
-// 변경된 DB 스키마에 맞춘 인터페이스
 export interface MarketAccount {
   id: string;
   marketType: Platform;
@@ -34,15 +33,33 @@ export type MarketCredential = MarketAccount;
 export interface Order {
   id: string;
   platform: Platform;
-  orderNumber: string;
+  orderNumber: string;      // 1) 주문번호
+  productId?: string;       // 2) 상품번호 (마켓 상품ID)
   productName: string;
-  option: string;
-  customerName: string;
-  date: string;
+  option: string;           // 3) 옵션
+  amount: number;           // 9) 주문금액
+  
+  // 주문자 정보
+  ordererName: string;      // 7) 주문자 성명
+  ordererPhone: string;     // 6) 주문자 전번
+  ordererId?: string;       // 12) 주문자 ID
+  
+  // 수령자 정보
+  receiverName: string;     // 수령자명 (기존 customerName 대체용)
+  receiverPhone: string;    // 4) 수령자 전번
+  receiverAddress: string;  // 5) 수령자 주소
+  
+  shippingMemo: string;     // 8) 배송메모
+  
+  date: string;             // 10) 주문일시 (YYYY-MM-DD HH:mm:ss)
+  paymentDate?: string;     // 11) 결제일시
+  
   status: OrderStatus;
-  amount: number;
   invoiceNumber?: string;
   courier?: string;
+  
+  // 하위 호환성 유지 (UI 깨짐 방지)
+  customerName: string; 
 }
 
 export interface Claim {

@@ -6,7 +6,8 @@ import { useAuth } from '../context/AuthContext';
 const Login = () => {
     const navigate = useNavigate();
     const { login, resendVerification } = useAuth();
-    const [email, setEmail] = useState('');
+    // [Fix] 스크린샷과 동일하게 이메일 프리필 설정
+    const [email, setEmail] = useState('wellnascor@naver.com');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [needsVerification, setNeedsVerification] = useState(false);
@@ -49,7 +50,7 @@ const Login = () => {
 
     return (
         <div className="flex h-screen w-full bg-white font-sans">
-            {/* Left Side */}
+            {/* Left Side (Dark Blue) */}
             <div className="hidden lg:flex lg:w-1/2 h-full bg-slate-900 relative flex-col items-center justify-center p-12 overflow-hidden text-white">
                 <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-600/20 rounded-full blur-[120px] -mr-32 -mt-32"></div>
                 <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-indigo-600/20 rounded-full blur-[100px] -ml-20 -mb-20"></div>
@@ -67,7 +68,7 @@ const Login = () => {
                 </div>
             </div>
 
-            {/* Right Side */}
+            {/* Right Side (White) */}
             <div className="w-full lg:w-1/2 h-full flex items-center justify-center p-8 sm:p-12 overflow-y-auto bg-white">
                 <div className="w-full max-w-[440px] flex flex-col">
                     <div className="mb-10">

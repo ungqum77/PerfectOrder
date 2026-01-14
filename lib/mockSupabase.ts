@@ -359,8 +359,13 @@ export const mockSupabase = {
         // [NEW] 외부 마켓 주문 동기화 함수
         syncExternalOrders: async () => {
             // 1. 등록된 마켓 계정 가져오기
-            const accounts = await mockSupabase.db.markets.get();
-            if (accounts.length === 0) return 0;
+            let accounts = await mockSupabase.db.markets.get();
+
+            // [변경] 계정이 없으면 그냥 종료합니다 (데모 계정 자동 생성 안 함)
+            if (accounts.length === 0) {
+                alert("연동된 마켓 계정이 없습니다.\n[연동 관리] 메뉴에서 계정을 먼저 추가해주세요.");
+                return 0;
+            }
 
             try {
                 // 2. 외부 API를 통해 주문 수집
@@ -386,7 +391,7 @@ export const mockSupabase = {
                 return addedCount;
             } catch (e) {
                 console.error("Sync Error:", e);
-                return 0;
+                throw e; // 상위에서 에러를 잡을 수 있게 throw
             }
         }
     }

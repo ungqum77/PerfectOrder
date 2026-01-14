@@ -34,25 +34,37 @@ export const marketApi = {
                 id: `N-${item.productOrderId}`,
                 platform: 'NAVER',
                 orderNumber: item.orderId,
+                productId: item.productId,
                 productName: item.productName,
                 option: item.productOption,
-                customerName: item.ordererName,
-                date: new Date(item.orderDate).toISOString().split('T')[0],
-                status: mapNaverStatus(item.productOrderStatus),
                 amount: item.totalPaymentAmount,
+                
+                ordererName: item.ordererName,
+                ordererPhone: item.ordererTel || '',
+                ordererId: item.ordererId,
+                
+                receiverName: item.receiverName || item.ordererName,
+                receiverPhone: item.receiverTel || '',
+                receiverAddress: `${item.shippingAddress?.baseAddress || ''} ${item.shippingAddress?.detailedAddress || ''}`.trim(),
+                shippingMemo: item.shippingMemo || '',
+                
+                date: item.orderDate ? new Date(item.orderDate).toISOString().replace('T', ' ').substring(0, 19) : '',
+                paymentDate: item.paymentDate ? new Date(item.paymentDate).toISOString().replace('T', ' ').substring(0, 19) : '',
+                
+                status: mapNaverStatus(item.productOrderStatus),
                 courier: '',
-                invoiceNumber: ''
+                invoiceNumber: '',
+                customerName: item.ordererName // 호환성
             }));
         } catch (e) {
             console.error("Naver API Error:", e);
-            // Fallback for Demo
+            // 네이버는 실패시 빈 배열 반환
             return [];
         }
     },
 
     /**
      * 쿠팡 주문 수집 (Proxy API 사용)
-     * Vercel Serverless Function (/api/coupang/fetch-orders)을 통해 호출
      */
     fetchCoupangOrders: async (credential: MarketAccount): Promise<Order[]> => {
         const { accessKey, secretKey, vendorId } = credential.credentials;
@@ -77,62 +89,54 @@ export const marketApi = {
             });
 
             if (!response.ok) {
-                // throw new Error(`Coupang Proxy Error (${response.status})`);
-                // 데모 환경(API 서버 없음)일 경우 무조건 에러가 발생하므로, 여기서 catch 블록으로 넘깁니다.
-                throw new Error("API_UNREACHABLE");
+                 const errorText = await response.text();
+                 throw new Error(`Coupang API Error (${response.status}): ${errorText}`);
             }
 
             const json = await response.json();
 
             // 5. 데이터 매핑 (Coupang Response -> App Order)
+            // 쿠팡 API 문서(Ordersheet) 기준 매핑
             if (!json.data) return [];
 
-            return json.data.map((item: any) => ({
-                id: `C-${item.orderId}`, // 쿠팡은 shipmentBoxId 등을 ID로 쓰기도 함
-                platform: 'COUPANG',
-                orderNumber: String(item.orderId),
-                productName: item.vendorItemName || item.itemName,
-                option: item.vendorItemPackageName || '단품',
-                customerName: item.orderer?.name || '구매자',
-                date: item.orderedAt ? item.orderedAt.split('T')[0] : new Date().toISOString().split('T')[0],
-                status: 'NEW', // ACCEPT 상태만 가져왔으므로 NEW
-                amount: item.orderPrice || 0,
-                courier: '',
-                invoiceNumber: ''
-            }));
+            return json.data.map((item: any) => {
+                const receiver = item.receiver || {};
+                const orderer = item.orderer || {};
+                const parcel = item.parcel || {};
+                const boxItem = parcel.boxItem || {};
 
-        } catch (e) {
-            console.warn("API 연동 실패 (데모 모드로 동작):", e);
-            
-            // [DEMO MODE] 백엔드 API가 없을 때 시연용 데이터를 반환하여 기능 동작 확인
-            return [
-                {
-                    id: `C-DEMO-${Date.now()}-${Math.floor(Math.random()*100)}`,
+                return {
+                    id: `C-${item.orderId}`,
                     platform: 'COUPANG',
-                    orderNumber: `2024${Math.floor(Math.random()*12+1).toString().padStart(2,'0')}${Math.floor(Math.random()*28+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*100000)}`,
-                    productName: '[시연용] 쿠팡 로켓 탐사수 2L',
-                    option: '12개입 x 2팩',
-                    customerName: '김쿠팡',
-                    date: new Date().toISOString().split('T')[0],
-                    status: 'NEW',
-                    amount: 13900,
+                    orderNumber: String(item.orderId),
+                    productId: String(item.vendorItemId || boxItem.vendorItemId || ''),
+                    productName: item.vendorItemName || item.itemName || '상품명 미상',
+                    option: item.vendorItemPackageName || '단품',
+                    amount: item.orderPrice || 0,
+                    
+                    ordererName: orderer.name || '구매자',
+                    ordererPhone: orderer.safeNumber || '', // 안심번호
+                    ordererId: orderer.email || '', // 쿠팡은 이메일을 ID처럼 사용
+                    
+                    receiverName: receiver.name || orderer.name,
+                    receiverPhone: receiver.safeNumber || '',
+                    receiverAddress: `${receiver.addr1 || ''} ${receiver.addr2 || ''}`.trim(),
+                    shippingMemo: item.deliveryRequestMessage || '',
+                    
+                    date: item.orderedAt ? item.orderedAt.replace('T', ' ').substring(0, 19) : '',
+                    paymentDate: item.paidAt ? item.paidAt.replace('T', ' ').substring(0, 19) : '',
+                    
+                    status: 'NEW', // ACCEPT 상태만 가져오므로 NEW
                     courier: '',
-                    invoiceNumber: ''
-                },
-                {
-                    id: `C-DEMO-${Date.now() + 1}`,
-                    platform: 'COUPANG',
-                    orderNumber: `2024${Math.floor(Math.random()*12+1).toString().padStart(2,'0')}${Math.floor(Math.random()*28+1).toString().padStart(2,'0')}-${Math.floor(Math.random()*100000)}`,
-                    productName: '[시연용] 곰곰 쌀 10kg',
-                    option: '2023년 햅쌀',
-                    customerName: '이로켓',
-                    date: new Date().toISOString().split('T')[0],
-                    status: 'NEW',
-                    amount: 32500,
-                    courier: '',
-                    invoiceNumber: ''
-                }
-            ];
+                    invoiceNumber: '',
+                    customerName: orderer.name || '구매자' // 호환성
+                };
+            });
+
+        } catch (e: any) {
+            console.error("쿠팡 연동 실패:", e.message);
+            // 실제 데이터 연동이 실패하면 에러를 던져서 UI에서 알 수 있게 함 (데모 데이터 반환 X)
+            throw e; 
         }
     },
 
@@ -149,8 +153,16 @@ export const marketApi = {
                 const orders = await marketApi.fetchNaverOrders(cred);
                 allOrders = [...allOrders, ...orders];
             } else if (cred.marketType === 'COUPANG') {
-                const orders = await marketApi.fetchCoupangOrders(cred);
-                allOrders = [...allOrders, ...orders];
+                // 쿠팡의 경우 에러 발생 시 전체 중단을 막기 위해 개별 try-catch 사용 가능
+                // 하지만 사용자가 '실제 연결' 확인을 원하므로 에러를 상위로 전파할 수도 있음.
+                // 여기서는 에러 발생 시 해당 계정만 건너뛰고 로그를 남기도록 처리
+                try {
+                    const orders = await marketApi.fetchCoupangOrders(cred);
+                    allOrders = [...allOrders, ...orders];
+                } catch (e) {
+                    console.error(`쿠팡(${cred.accountName}) 동기화 중 오류 발생`);
+                    // 필요시 throw e; 하여 전체 중단 가능
+                }
             }
         }
         
