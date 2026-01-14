@@ -3,8 +3,8 @@ import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { marketApi } from '../lib/marketApi'; // marketApi 추가
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Database, Zap, AlertTriangle } from 'lucide-react';
+import { marketApi } from '../lib/marketApi';
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -13,6 +13,7 @@ interface MarketInfo {
     authType: 'LOGIN' | 'API';
     color: string;
     description: string;
+    ipGuide?: boolean; // IP 설정 가이드 필요 여부
     fields: { key: string, label: string, type?: string, placeholder?: string }[];
 }
 
@@ -34,6 +35,7 @@ const MARKETS: MarketInfo[] = [
         authType: 'API', 
         color: 'bg-red-500', 
         description: '쿠팡 Wing 판매자 센터 > 판매자 정보 > 추가판매정보 > 오픈API 키 발급에서 확인하세요.',
+        ipGuide: true, // 쿠팡은 IP 설정이 필수이므로 가이드 표시
         fields: [
             { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00...' },
             { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
@@ -75,7 +77,6 @@ const MARKETS: MarketInfo[] = [
 ];
 
 // [Core Logic] 강력한 데이터 정제 함수 (sanitizeCredential)
-// API Key 복사/붙여넣기 시 포함되는 보이지 않는 문자(ZWSP)와 공백을 제거합니다.
 const sanitizeCredential = (value: string) => {
     if (!value) return "";
     return value
@@ -87,37 +88,6 @@ const sanitizeCredential = (value: string) => {
         .trim();
 };
 
-// [Debug] 입력값 분석기
-const analyzeInput = (input: string | undefined) => {
-    if (!input) return null;
-    const length = input.length;
-    
-    const charAnalysis = input.split('').map((char, index) => {
-        const code = char.codePointAt(0) || 0;
-        const isStandard = code >= 32 && code <= 126;
-        return { char, code, isStandard };
-    });
-
-    return (
-        <div className="mt-1.5 p-2 bg-slate-50 text-slate-500 rounded-lg text-[10px] font-mono overflow-x-auto border border-slate-200">
-            <div className="flex justify-between items-center mb-1">
-                <span className="text-slate-400">Length: <span className="text-slate-700 font-bold">{length}</span></span>
-                <div className="flex items-center gap-1 text-emerald-600 font-bold">
-                    <ShieldCheck size={10} /> 
-                    <span>Smart Cleaned</span>
-                </div>
-            </div>
-            <div className="flex flex-wrap gap-1">
-                {charAnalysis.map((item, idx) => (
-                    <span key={idx} className={`px-1 rounded flex items-center justify-center min-w-[16px] h-4 border ${item.isStandard ? 'bg-white border-slate-200' : 'bg-red-50 border-red-200 text-red-600 font-bold'}`}>
-                        {item.char}
-                    </span>
-                ))}
-            </div>
-        </div>
-    );
-};
-
 const Integration = () => {
     const navigate = useNavigate();
     const [selectedPlatform, setSelectedPlatform] = useState<Platform>('NAVER');
@@ -126,8 +96,8 @@ const Integration = () => {
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalLoading, setModalLoading] = useState(false);
-    const [testLoading, setTestLoading] = useState(false); // 테스트 로딩 상태
-    const [testResult, setTestResult] = useState<{ success: boolean, message: string } | null>(null); // 테스트 결과
+    const [testLoading, setTestLoading] = useState(false); 
+    const [testResult, setTestResult] = useState<{ success: boolean, message: string } | null>(null); 
     const [loadingMessage, setLoadingMessage] = useState<string>('연동 정보 저장');
     const [formAlias, setFormAlias] = useState('');
     const [formCredentials, setFormCredentials] = useState<Record<string, string>>({});
@@ -161,14 +131,12 @@ const Integration = () => {
         setIsModalOpen(true);
     };
 
-    // [Handler] 입력 시 실시간 정제
     const handleCredentialChange = (key: string, value: string) => {
         const cleanValue = sanitizeCredential(value);
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
-        setTestResult(null); // 입력 변경 시 테스트 결과 초기화
+        setTestResult(null); 
     };
 
-    // [Handler] 스마트 붙여넣기
     const handleCredentialPaste = (e: React.ClipboardEvent, key: string) => {
         e.preventDefault(); 
         const text = e.clipboardData.getData('text/plain');
@@ -176,14 +144,17 @@ const Integration = () => {
         setFormCredentials(prev => ({ ...prev, [key]: cleanText }));
     };
 
-    // [New] 연동 테스트 핸들러
+    const handleCopyIp = () => {
+        navigator.clipboard.writeText("0.0.0.0");
+        alert("IP 설정값(0.0.0.0)이 복사되었습니다.\n쿠팡 윙 'IP 주소' 란에 붙여넣기 하세요.");
+    };
+
     const handleTestConnection = async (e: React.MouseEvent) => {
         e.preventDefault();
         setTestLoading(true);
         setTestResult(null);
 
         try {
-            // 1. 임시 계정 객체 생성
             const tempAccount: MarketAccount = {
                 id: 'temp-test',
                 marketType: selectedPlatform,
@@ -192,10 +163,7 @@ const Integration = () => {
                 credentials: formCredentials
             };
 
-            // 2. 플랫폼별 테스트 호출
             if (selectedPlatform === 'COUPANG') {
-                // 쿠팡은 실제 API 호출 (1개 상태만 조회)
-                // marketApi 내부에서 fetchCoupangOrders 호출 시 에러가 throw됨
                 await marketApi.fetchCoupangOrders(tempAccount);
                 setTestResult({ success: true, message: "성공적으로 연결되었습니다! (주문 조회 성공)" });
             } else if (selectedPlatform === 'NAVER') {
@@ -207,11 +175,9 @@ const Integration = () => {
 
         } catch (error: any) {
             console.error("Test Connection Error:", error);
-            
             let errorMsg = error.message;
-            // 자주 발생하는 에러 친절한 설명
             if (errorMsg.includes("404")) errorMsg += "\n(API 경로를 찾을 수 없습니다. Vercel 배포 환경인지 확인해주세요)";
-            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 쿠팡 윙에서 현재 IP를 허용해주세요)";
+            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 쿠팡 윙에서 0.0.0.0을 허용했는지 확인하세요)";
             
             setTestResult({ success: false, message: errorMsg });
         } finally {
@@ -222,7 +188,6 @@ const Integration = () => {
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
         
-        // Guest 체크
         if (isSupabaseConfigured() && !dbAuthUser) {
             alert("⚠️ 게스트 상태입니다. 정보를 저장하려면 먼저 로그인해주세요.");
             navigate('/login');
@@ -410,6 +375,33 @@ const Integration = () => {
                         </div>
                         
                         <div className="overflow-y-auto flex-1 p-8 space-y-5">
+                            {/* [IP Guide] 쿠팡 전용 IP 가이드 */}
+                            {currentMarket.ipGuide && (
+                                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-4">
+                                    <div className="flex items-start gap-3">
+                                        <div className="p-1 bg-blue-100 rounded text-blue-600 mt-0.5"><Info size={16} /></div>
+                                        <div>
+                                            <h5 className="text-sm font-bold text-blue-800 mb-1">고정 IP 설정 안내 (중요)</h5>
+                                            <p className="text-xs text-blue-700 leading-relaxed mb-3">
+                                                현재 사용중인 시스템(Vercel)은 클라우드 특성상 IP가 수시로 변경됩니다.<br/>
+                                                따라서 쿠팡 윙 API 설정에서 특정 IP 대신 <strong>전체 허용</strong> 설정을 사용해야 정상적으로 주문을 가져올 수 있습니다.<br/>
+                                                (Tip: 뒤에 붙는 /0 을 제거하고 0.0.0.0 만 입력하세요)
+                                            </p>
+                                            <div className="flex items-center gap-2 bg-white rounded-lg border border-blue-200 p-2">
+                                                <code className="flex-1 font-mono text-sm font-bold text-slate-700 text-center">0.0.0.0</code>
+                                                <button 
+                                                    onClick={handleCopyIp}
+                                                    className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-bold rounded-md transition-colors flex items-center gap-1"
+                                                >
+                                                    <Copy size={12} /> 복사
+                                                </button>
+                                            </div>
+                                            <p className="text-[10px] text-blue-500 mt-2">* IP 설정 반영까지 최대 1시간이 소요될 수 있습니다.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-slate-700 flex items-center gap-1">
                                     계정 별칭 <span className="text-red-500">*</span>
@@ -420,7 +412,6 @@ const Integration = () => {
                                     onChange={(e) => setFormAlias(e.target.value)}
                                     placeholder="예: 강남 1호점, 본사 직영점"
                                     className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none text-sm transition-all"
-                                    autoFocus
                                 />
                             </div>
 
@@ -439,8 +430,6 @@ const Integration = () => {
                                         placeholder={field.placeholder}
                                         className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none font-mono text-sm bg-slate-50 transition-all"
                                     />
-                                    {/* 스마트 붙여넣기 결과 시각화 */}
-                                    {analyzeInput(formCredentials[field.key])}
                                 </div>
                             ))}
 

@@ -99,7 +99,11 @@ export const marketApi = {
                         
                         // [중요] IP 차단(403)이나 권한 오류(401)는 빈 배열로 무시하지 않고 에러를 던져야 함
                         if (res.status === 403 || res.status === 401) {
-                            const errorMsg = err.hint || err.details || `쿠팡 API 접근 권한 오류 (${res.status})`;
+                            let errorMsg = err.hint || err.details || `쿠팡 API 접근 권한 오류 (${res.status})`;
+                            // 사용자 친화적인 메시지 추가
+                            if(res.status === 403) {
+                                errorMsg += "\n\n(Tip: 쿠팡 윙에 0.0.0.0 을 등록하셨는지 확인해주세요. 반영까지 최대 1시간이 걸릴 수 있습니다.)";
+                            }
                             throw new Error(errorMsg);
                         }
                         
