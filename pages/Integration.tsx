@@ -213,17 +213,17 @@ const Integration = () => {
                 isActive: true
             };
             
-            // [NEW] 저장은 이제 mockSupabase에서 알아서 Offline/DB 모드를 결정함.
-            // UI에서는 단순히 성공/실패만 따지면 됨.
-            const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
+            // [V2] 복잡한 Sync 로직 제거 -> 즉시 저장 (Simple)
+            // 중복 검사 로직이 포함된 saveSimple 호출
+            const result = await mockSupabase.db.markets.saveSimple(newAccountPayload as MarketAccount);
 
-            if (result.mode === 'OFFLINE_QUEUE') {
-                alert("📡 서버 응답이 지연되어 '로컬 모드'로 우선 저장되었습니다.\n인터넷 연결이 안정되면 자동으로 서버에 동기화됩니다.");
-            } else {
-                alert("✅ 계정이 성공적으로 연동되었습니다!");
+            if (!result.success) {
+                // 실패 시 명확한 메시지 전달
+                throw new Error(result.message || "저장에 실패했습니다.");
             }
 
-            await loadAccounts(); // 로컬+DB 데이터 통합 조회
+            alert("✅ 계정이 성공적으로 연동되었습니다!");
+            await loadAccounts(); 
             setIsModalOpen(false);
 
         } catch (error: any) {
@@ -448,23 +448,11 @@ const Integration = () => {
                                             <div className="flex items-center gap-4">
                                                 <div className="bg-slate-100 p-3 rounded-xl text-slate-500 relative">
                                                     <Store size={20} />
-                                                    {acc._source === 'LOCAL_PENDING' && (
-                                                        <span className="absolute -top-1 -right-1 flex size-3">
-                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                                                            <span className="relative inline-flex rounded-full size-3 bg-orange-500"></span>
-                                                        </span>
-                                                    )}
                                                 </div>
                                                 <div>
                                                     <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                                                         {acc.accountName}
-                                                        {acc._source === 'LOCAL_PENDING' ? (
-                                                             <span className="bg-orange-100 text-orange-700 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
-                                                                <CloudOff size={10} /> Sync Pending
-                                                             </span>
-                                                        ) : (
-                                                            acc.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full">Active</span>
-                                                        )}
+                                                        {acc.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full">Active</span>}
                                                     </h4>
                                                     <div className="flex items-center gap-4 mt-1">
                                                         <p className="text-xs text-slate-400 font-mono">ID: {acc.id.substring(0, 8)}...</p>
