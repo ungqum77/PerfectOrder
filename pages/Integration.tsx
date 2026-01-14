@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, saveSupabaseConfig, clearSupabaseConfig, isSupabaseConfigured } from '../lib/supabase';
-import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn, Search, ShieldCheck, ClipboardCopy } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, AlertCircle, Database, Server, Save, X, Key, Store, RefreshCw, LogIn, Search, ShieldCheck, ClipboardCopy, CloudOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -170,47 +170,21 @@ const Integration = () => {
     // [Event Handler] 입력 시 실시간 정제
     const handleCredentialChange = (key: string, value: string) => {
         const cleanValue = sanitizeCredential(value);
-        
-        // 디버깅용 로그: 정제 전후 비교
         if (value !== cleanValue) {
             console.log(`[Sanitize] Input was dirty. Cleaned '${value}' -> '${cleanValue}'`);
         }
-        
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
     };
 
     // [Event Handler] 붙여넣기 시 "보이지 않는 메모장" 로직 수행
     const handlePaste = (e: React.ClipboardEvent, key: string) => {
-        e.preventDefault(); // 브라우저 기본 붙여넣기 차단
-        
-        // 1. 순수 텍스트만 추출
+        e.preventDefault(); 
         const text = e.clipboardData.getData('text/plain');
-        
-        // 2. 강력 정제 수행
         const cleanText = sanitizeCredential(text);
         
         console.log(`[Smart Paste] Raw Length: ${text.length} -> Clean Length: ${cleanText.length}`);
-        console.log(`[Paste Debug] Hex Codes:`, Array.from(text).map(c => "U+" + c.codePointAt(0)?.toString(16).toUpperCase()));
-
-        if (text.length !== cleanText.length) {
-            console.warn("⚠️ 붙여넣기 된 텍스트에서 보이지 않는 문자가 제거되었습니다.");
-        }
-
         setFormCredentials(prev => ({ ...prev, [key]: cleanText }));
     };
-
-    // 타임아웃 래퍼 함수
-    const saveWithTimeout = async (payload: any, timeoutMs: number = 5000) => {
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Timeout")), timeoutMs)
-        );
-        const result: any = await Promise.race([
-            mockSupabase.db.markets.save(payload as MarketAccount),
-            timeoutPromise
-        ]);
-        if (!result.success) throw new Error(result.message);
-        return result;
-    }
 
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -225,17 +199,12 @@ const Integration = () => {
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
             // 최종 전송 전 한번 더 검증 및 로깅
-            console.group("🚀 [Final Submission Check]");
             currentMarket?.fields.forEach(field => {
                 const val = formCredentials[field.key] || "";
-                const cleanVal = sanitizeCredential(val); // Safety Check
-                
+                const cleanVal = sanitizeCredential(val); 
                 if (!cleanVal) throw new Error(`${field.label}을(를) 입력해주세요.`);
-                
                 cleanCredentials[field.key] = cleanVal;
-                console.log(`${field.key}: "${cleanVal}" (Len: ${cleanVal.length})`);
             });
-            console.groupEnd();
 
             const newAccountPayload = {
                 marketType: selectedPlatform,
@@ -244,40 +213,22 @@ const Integration = () => {
                 isActive: true
             };
             
-            // [재시도 로직] 1차 시도 -> 타임아웃 시 -> 2차 시도
-            try {
-                await saveWithTimeout(newAccountPayload, 5000); // 5초 타임아웃
-            } catch (firstError: any) {
-                console.warn("⚠️ 1차 시도 실패/타임아웃:", firstError);
-                
-                if (firstError.message === "Timeout") {
-                    console.log("🔄 자동 재시도(Retry) 시작...");
-                    setLoadingMessage("응답 지연.. 재시도 중 ↻");
-                    
-                    // 2차 시도 (8초 대기)
-                    await saveWithTimeout(newAccountPayload, 8000);
-                } else {
-                    throw firstError; // 타임아웃이 아니면 바로 에러 처리
-                }
+            // [NEW] 저장은 이제 mockSupabase에서 알아서 Offline/DB 모드를 결정함.
+            // UI에서는 단순히 성공/실패만 따지면 됨.
+            const result = await mockSupabase.db.markets.save(newAccountPayload as MarketAccount);
+
+            if (result.mode === 'OFFLINE_QUEUE') {
+                alert("📡 서버 응답이 지연되어 '로컬 모드'로 우선 저장되었습니다.\n인터넷 연결이 안정되면 자동으로 서버에 동기화됩니다.");
+            } else {
+                alert("✅ 계정이 성공적으로 연동되었습니다!");
             }
 
-            alert("✅ 계정이 성공적으로 연동되었습니다!");
-            await loadAccounts();
+            await loadAccounts(); // 로컬+DB 데이터 통합 조회
             setIsModalOpen(false);
 
         } catch (error: any) {
             console.error("🔥 Save Error Detailed:", error);
-            let message = error.message || "알 수 없는 오류";
-            
-            if (message === "Timeout") {
-                if (confirm("서버 응답이 없습니다. DB 연결 설정 문제일 수 있습니다.\n\nDB 연결을 해제하고 로컬 모드로 전환하시겠습니까? (저장은 다시 해주셔야 합니다)")) {
-                    clearSupabaseConfig();
-                    return;
-                }
-                message = "서버가 응답하지 않습니다. 잠시 후 다시 시도해주세요.";
-            }
-            
-            alert(`❌ 연동 실패\n\n${message}`);
+            alert(`❌ 연동 실패\n\n${error.message}`);
         } finally {
             setModalLoading(false);
             setLoadingMessage('연동 정보 저장');
@@ -492,16 +443,28 @@ const Integration = () => {
                                         <p className="text-slate-400 text-sm mt-1">우측 상단 버튼을 눌러 계정을 추가하세요.</p>
                                     </div>
                                 ) : (
-                                    accountsForCurrentPlatform.map((acc) => (
+                                    accountsForCurrentPlatform.map((acc: any) => (
                                         <div key={acc.id} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex justify-between items-center group hover:border-primary-200 transition-all">
                                             <div className="flex items-center gap-4">
-                                                <div className="bg-slate-100 p-3 rounded-xl text-slate-500">
+                                                <div className="bg-slate-100 p-3 rounded-xl text-slate-500 relative">
                                                     <Store size={20} />
+                                                    {acc._source === 'LOCAL_PENDING' && (
+                                                        <span className="absolute -top-1 -right-1 flex size-3">
+                                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                                                            <span className="relative inline-flex rounded-full size-3 bg-orange-500"></span>
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                                                         {acc.accountName}
-                                                        {acc.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full">Active</span>}
+                                                        {acc._source === 'LOCAL_PENDING' ? (
+                                                             <span className="bg-orange-100 text-orange-700 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                                <CloudOff size={10} /> Sync Pending
+                                                             </span>
+                                                        ) : (
+                                                            acc.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full">Active</span>
+                                                        )}
                                                     </h4>
                                                     <div className="flex items-center gap-4 mt-1">
                                                         <p className="text-xs text-slate-400 font-mono">ID: {acc.id.substring(0, 8)}...</p>

@@ -5,8 +5,8 @@ import { supabase, isSupabaseConfigured } from './supabase';
 const STORAGE_KEYS = {
   USERS: 'po_users',
   SESSION: 'po_session',
-  // MARKET_ACCOUNTS 키는 더 이상 사용하지 않음 (DB 강제)
-  ORDERS: 'po_orders' 
+  ORDERS: 'po_orders',
+  PENDING_MARKETS: 'po_pending_markets' // [NEW] 오프라인 대기열 키
 };
 
 // UUID 생성 헬퍼
@@ -33,30 +33,37 @@ const toCamelCase = (obj: any): any => {
     return obj;
 };
 
+// 로컬 스토리지 헬퍼
+const getLocalData = <T>(key: string): T[] => {
+    try {
+        const str = localStorage.getItem(key);
+        return str ? JSON.parse(str) : [];
+    } catch { return []; }
+};
+const setLocalData = (key: string, data: any[]) => localStorage.setItem(key, JSON.stringify(data));
+
 // 로컬 스토리지에 유저 저장 헬퍼 (백업용)
 const saveLocalUser = (user: User) => {
-    const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
-    const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-    
+    const users = getLocalData<User>(STORAGE_KEYS.USERS);
     const existingIndex = users.findIndex(u => u.email === user.email);
     if (existingIndex >= 0) {
         users[existingIndex] = user;
     } else {
         users.push(user);
     }
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    setLocalData(STORAGE_KEYS.USERS, users);
 };
 
 export const mockSupabase = {
   getConnectionStatus: () => isSupabaseConfigured() ? 'CONNECTED' : 'DISCONNECTED',
 
   auth: {
+    // ... (기존 Auth 로직 유지)
     signUp: async (email: string, password: string, name: string): Promise<{ user: User | null, error: string | null }> => {
       const now = new Date();
       const trialEndsAt = new Date(now.getTime() + (2 * 24 * 60 * 60 * 1000)).toISOString();
       const localId = generateUUID(); 
 
-      // 1. Supabase 회원가입 시도
       if (isSupabaseConfigured() && supabase) {
         try {
           const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -90,9 +97,7 @@ export const mockSupabase = {
         }
       }
 
-      // 2. Mock Fallback
-      const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
-      const users: User[] = usersStr ? JSON.parse(usersStr) : [];
+      const users = getLocalData<User>(STORAGE_KEYS.USERS);
       if (users.find(u => u.email === email)) return { user: null, error: "이미 존재하는 이메일입니다." };
 
       const newUser: User = {
@@ -142,8 +147,7 @@ export const mockSupabase = {
         }
       }
 
-      const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
-      const users: User[] = usersStr ? JSON.parse(usersStr) : [];
+      const users = getLocalData<User>(STORAGE_KEYS.USERS);
       const user = users.find(u => u.email === email);
       
       if (!user) return { user: null, error: "사용자를 찾을 수 없습니다. 회원가입을 확인해주세요." };
@@ -183,10 +187,9 @@ export const mockSupabase = {
                     await supabase.from('users').update(updates).eq('id', userId);
                 } catch(e) { console.error(e); }
             }
-            const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
-            let users: User[] = usersStr ? JSON.parse(usersStr) : [];
-            users = users.map(u => u.id === userId ? { ...u, ...updates } : u);
-            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+            const users = getLocalData<User>(STORAGE_KEYS.USERS);
+            const newUsers = users.map(u => u.id === userId ? { ...u, ...updates } : u);
+            setLocalData(STORAGE_KEYS.USERS, newUsers);
             
             const session = localStorage.getItem(STORAGE_KEYS.SESSION);
             if (session) {
@@ -199,174 +202,219 @@ export const mockSupabase = {
                 const { data } = await supabase.from('users').select('*');
                 if (data) return toCamelCase(data);
             }
-            const usersStr = localStorage.getItem(STORAGE_KEYS.USERS);
-            return usersStr ? JSON.parse(usersStr) : [];
+            return getLocalData<User>(STORAGE_KEYS.USERS);
         }
     },
     
-    // [핵심 변경] 마켓 계정: 무조건 DB 저장 & 컬럼 매핑 강화 & Update 지원
+    // [핵심 변경] 마켓 계정: 저장 실패 시 로컬 대기열로 이동
     markets: {
-        save: async (account: MarketAccount): Promise<{ success: boolean; mode: 'DB' | 'LOCAL'; message?: string }> => {
-            
-            // 1. DB 연결 확인
-            if (!isSupabaseConfigured() || !supabase) {
-                return { success: false, mode: 'LOCAL', message: 'DB 연결이 설정되지 않았습니다. Integration 페이지에서 설정을 확인하세요.' };
-            }
-
-            // 2. 유저 ID 식별
+        save: async (account: MarketAccount): Promise<{ success: boolean; mode: 'DB' | 'LOCAL' | 'OFFLINE_QUEUE'; message?: string }> => {
+            // 1. 유저 ID 식별
             let userId = null;
-            const { data: { user } } = await supabase.auth.getUser();
-            
-            if (user) {
-                userId = user.id;
-            } else {
-                // Supabase Auth 세션이 없으면 로컬 스토리지에서 백업용 ID라도 찾음
+            if (isSupabaseConfigured() && supabase) {
+                const { data: { user } } = await supabase.auth.getUser();
+                userId = user?.id;
+            }
+            if (!userId) {
                 const sessionStr = localStorage.getItem(STORAGE_KEYS.SESSION);
                 const localUser = sessionStr ? JSON.parse(sessionStr) : null;
                 if (localUser) userId = localUser.id;
             }
 
-            if (!userId) {
-                return { success: false, mode: 'LOCAL', message: '로그인 정보가 유효하지 않아 DB에 저장할 수 없습니다.' };
-            }
-
-            // 3. [핵심] DB 컬럼 매핑 (Mapping Logic)
-            // Integration.tsx의 MARKETS 상수 정의에 따라 키값이 다름을 처리
-            let vendorId = '';
-            let accessKey = '';
-            let secretKey = '';
-            
+            // 2. 페이로드 구성 (DB용)
             const creds = account.credentials;
+            // 매핑 로직 유지
+            let vendorId = creds.vendorId || creds.username || '';
+            let accessKey = creds.accessKey || creds.apiKey || creds.clientId || '';
+            let secretKey = creds.secretKey || creds.clientSecret || creds.password || '';
 
             switch (account.marketType) {
-                case 'NAVER':
-                    // 네이버: Client ID -> access_key, Client Secret -> secret_key
-                    accessKey = creds.clientId || '';
-                    secretKey = creds.clientSecret || '';
-                    break;
-                case 'COUPANG':
-                    // 쿠팡: Vendor ID -> vendor_id, Access Key -> access_key, Secret Key -> secret_key
-                    vendorId = creds.vendorId || '';
-                    accessKey = creds.accessKey || '';
-                    secretKey = creds.secretKey || '';
-                    break;
-                case '11ST':
-                    // 11번가: API Key -> access_key
-                    accessKey = creds.apiKey || '';
-                    break;
-                case 'GMARKET':
-                case 'AUCTION':
-                    // 지마켓/옥션: ID -> vendor_id, PW -> secret_key
-                    vendorId = creds.username || '';
-                    secretKey = creds.password || '';
-                    break;
-                default:
-                    // 기타: 가능한 모든 키 시도
-                    vendorId = creds.vendorId || creds.username || '';
-                    accessKey = creds.accessKey || creds.apiKey || creds.clientId || '';
-                    secretKey = creds.secretKey || creds.clientSecret || creds.password || '';
+                case 'NAVER': accessKey = creds.clientId || ''; secretKey = creds.clientSecret || ''; break;
+                case 'COUPANG': vendorId = creds.vendorId || ''; accessKey = creds.accessKey || ''; secretKey = creds.secretKey || ''; break;
+                case '11ST': accessKey = creds.apiKey || ''; break;
+                case 'GMARKET': case 'AUCTION': vendorId = creds.username || ''; secretKey = creds.password || ''; break;
             }
 
+            const payload: any = {
+                id: account.id || generateUUID(), // ID가 없으면 미리 생성
+                user_id: userId,
+                market_type: account.marketType,
+                account_name: account.accountName,
+                is_active: account.isActive,
+                vendor_id: vendorId,     
+                access_key: accessKey,   
+                secret_key: secretKey,
+                created_at: new Date().toISOString()
+            };
+
+            // 3. DB 저장 시도 (타임아웃 적용)
             try {
-                // 4. DB 저장 시도 (Update or Insert)
-                const payload: any = {
-                    user_id: userId,          // 1. 유저 ID
-                    market_type: account.marketType,
-                    account_name: account.accountName,
-                    is_active: account.isActive,
+                if (isSupabaseConfigured() && supabase && userId) {
+                    const dbPromise = (async () => {
+                         // 이미 존재하는 ID면 Update, 아니면 Insert
+                         const { data: existing } = await supabase.from('market_accounts').select('id').eq('id', payload.id).maybeSingle();
+                         
+                         if (existing) {
+                             return await supabase.from('market_accounts').update(payload).eq('id', payload.id);
+                         } else {
+                             return await supabase.from('market_accounts').insert(payload);
+                         }
+                    })();
+
+                    // 4초 타임아웃: 4초 안에 DB 응답 없으면 바로 로컬 저장으로 넘어감
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("DB_TIMEOUT")), 4000));
                     
-                    // 2. 매핑된 변수 사용
-                    vendor_id: vendorId,     
-                    access_key: accessKey,   
-                    secret_key: secretKey    
-                };
+                    const { error }: any = await Promise.race([dbPromise, timeoutPromise]);
 
-                let error;
-
-                // ID가 존재하고 유효하다면 UPDATE, 아니면 INSERT
-                if (account.id && typeof account.id === 'string' && account.id.trim() !== '') {
-                     const { error: updateError } = await supabase
-                        .from('market_accounts')
-                        .update(payload)
-                        .eq('id', account.id);
-                     error = updateError;
+                    if (error) throw error;
+                    return { success: true, mode: 'DB' };
                 } else {
-                     const { error: insertError } = await supabase
-                        .from('market_accounts')
-                        .insert(payload);
-                     error = insertError;
+                    throw new Error("NO_DB_CONNECTION");
                 }
-
-                // 5. 에러 핸들링
-                if (error) {
-                    console.error("DB Save Error:", error);
-                    return { success: false, mode: 'LOCAL', message: `DB 저장 실패: ${error.message}` };
-                }
-                
-                return { success: true, mode: 'DB' };
 
             } catch (e: any) {
-                console.error("Critical DB Error:", e);
-                return { success: false, mode: 'LOCAL', message: `시스템 오류: ${e.message}` };
+                console.warn("⚠️ DB Save Failed or Timeout. Saving to Offline Queue.", e.message);
+                
+                // [OFFLINE FALLBACK] 실패 시 로컬 대기열에 저장
+                const pendingList = getLocalData<any>(STORAGE_KEYS.PENDING_MARKETS);
+                
+                // 기존 대기열에 같은 ID가 있으면 업데이트, 없으면 추가
+                const idx = pendingList.findIndex((item: any) => item.id === payload.id);
+                if (idx >= 0) pendingList[idx] = payload;
+                else pendingList.push(payload);
+                
+                setLocalData(STORAGE_KEYS.PENDING_MARKETS, pendingList);
+
+                return { 
+                    success: true, 
+                    mode: 'OFFLINE_QUEUE', 
+                    message: '서버 응답이 늦어 로컬에 우선 저장되었습니다. 연결 시 자동 동기화됩니다.' 
+                };
             }
         },
         
         delete: async (id: string) => {
+            // 1. DB 삭제 시도
             if (isSupabaseConfigured() && supabase) {
                 await supabase.from('market_accounts').delete().eq('id', id);
             }
+            // 2. 로컬 대기열에서도 삭제
+            const pendingList = getLocalData<any>(STORAGE_KEYS.PENDING_MARKETS);
+            const newList = pendingList.filter(item => item.id !== id);
+            setLocalData(STORAGE_KEYS.PENDING_MARKETS, newList);
         },
 
         get: async (): Promise<MarketAccount[]> => {
-            if (!isSupabaseConfigured() || !supabase) return [];
+            let dbData: any[] = [];
 
-            try {
-                let userId = null;
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) userId = user.id;
-                else {
-                    const sessionStr = localStorage.getItem(STORAGE_KEYS.SESSION);
-                    if (sessionStr) userId = JSON.parse(sessionStr).id;
+            // 1. DB 데이터 가져오기
+            if (isSupabaseConfigured() && supabase) {
+                try {
+                    let userId = null;
+                    const { data: { user } } = await supabase.auth.getUser();
+                    userId = user?.id;
+
+                    // 로그인 안되어 있으면 로컬 세션 확인
+                    if (!userId) {
+                         const session = mockSupabase.auth.getSession();
+                         if (session) userId = session.id;
+                    }
+
+                    if (userId) {
+                        const { data, error } = await supabase.from('market_accounts').select('*').eq('user_id', userId);
+                        if (!error && data) dbData = data;
+                    }
+                } catch (e) {
+                    console.warn("DB Fetch Failed, using local data only.");
                 }
-
-                let query = supabase.from('market_accounts').select('*');
-                if (userId) {
-                    query = query.eq('user_id', userId);
-                }
-
-                const { data, error } = await query;
-
-                if (error) {
-                    console.error("DB Fetch Error:", error);
-                    return [];
-                }
-
-                if (data) {
-                    return data.map((item: any) => ({
-                        id: item.id,
-                        marketType: item.market_type,
-                        accountName: item.account_name,
-                        isActive: item.is_active,
-                        createdAt: item.created_at,
-                        credentials: {
-                            // 역방향 매핑 (DB -> Frontend)
-                            vendorId: item.vendor_id || '',
-                            accessKey: item.access_key || '',
-                            secretKey: item.secret_key || '',
-                            // 컴포넌트 호환성을 위한 별칭(Alias) 제공
-                            clientId: item.access_key, 
-                            clientSecret: item.secret_key, 
-                            apiKey: item.access_key,
-                            username: item.vendor_id, 
-                            password: item.secret_key, 
-                        }
-                    }));
-                }
-                return [];
-            } catch (e) {
-                console.error("DB Logic Error:", e);
-                return [];
             }
+
+            // 2. 로컬 대기열(Pending) 데이터 가져오기
+            const pendingList = getLocalData<any>(STORAGE_KEYS.PENDING_MARKETS);
+
+            // 3. 병합 (로컬 대기열이 최신일 수 있으므로 ID가 겹치면 로컬 우선)
+            // DB 데이터 맵핑
+            const mappedDbData = dbData.map((item: any) => ({
+                id: item.id,
+                marketType: item.market_type,
+                accountName: item.account_name,
+                isActive: item.is_active,
+                createdAt: item.created_at,
+                credentials: {
+                    vendorId: item.vendor_id || '',
+                    accessKey: item.access_key || '',
+                    secretKey: item.secret_key || '',
+                    clientId: item.access_key, 
+                    clientSecret: item.secret_key, 
+                    apiKey: item.access_key,
+                    username: item.vendor_id, 
+                    password: item.secret_key, 
+                },
+                _source: 'DB' // 디버깅용 태그
+            }));
+
+            // 로컬 데이터 맵핑
+            const mappedPendingData = pendingList.map((item: any) => ({
+                id: item.id,
+                marketType: item.market_type,
+                accountName: item.account_name,
+                isActive: item.is_active,
+                createdAt: item.created_at,
+                credentials: {
+                    vendorId: item.vendor_id || '',
+                    accessKey: item.access_key || '',
+                    secretKey: item.secret_key || '',
+                    clientId: item.access_key,
+                    clientSecret: item.secret_key,
+                    apiKey: item.access_key,
+                    username: item.vendor_id,
+                    password: item.secret_key,
+                },
+                _source: 'LOCAL_PENDING' // 디버깅용 태그
+            }));
+
+            // ID 기준으로 병합 (pending이 덮어씀)
+            const mergedMap = new Map();
+            mappedDbData.forEach((item: any) => mergedMap.set(item.id, item));
+            mappedPendingData.forEach((item: any) => mergedMap.set(item.id, item));
+
+            return Array.from(mergedMap.values());
+        },
+
+        // [NEW] 대기열 처리 함수 (Sync Process)
+        syncPendingItems: async (): Promise<number> => {
+            if (!isSupabaseConfigured() || !supabase) return 0;
+            
+            const pendingList = getLocalData<any>(STORAGE_KEYS.PENDING_MARKETS);
+            if (pendingList.length === 0) return 0;
+
+            console.log(`🔄 Syncing ${pendingList.length} pending items...`);
+            
+            let successCount = 0;
+            const remainingList = [];
+
+            for (const item of pendingList) {
+                try {
+                    // user_id가 누락되었을 경우 현재 유저로 보정
+                    if (!item.user_id) {
+                         const { data: { user } } = await supabase.auth.getUser();
+                         if (user) item.user_id = user.id;
+                         else throw new Error("No User ID");
+                    }
+
+                    // Upsert (Insert or Update)
+                    const { error } = await supabase.from('market_accounts').upsert(item);
+                    
+                    if (error) throw error;
+                    successCount++;
+                } catch (e) {
+                    console.error("Sync Item Failed:", e);
+                    remainingList.push(item); // 실패하면 남겨둠
+                }
+            }
+
+            setLocalData(STORAGE_KEYS.PENDING_MARKETS, remainingList);
+            return successCount;
         }
     },
     orders: {

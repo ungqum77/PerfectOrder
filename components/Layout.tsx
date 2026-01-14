@@ -17,7 +17,9 @@ import {
   ShieldAlert,
   Database,
   Wifi,
-  WifiOff
+  WifiOff,
+  CloudCog,
+  CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { mockSupabase } from '../lib/mockSupabase';
@@ -125,7 +127,7 @@ const Sidebar = () => {
         
         {/* Version Info */}
         <div className="text-center">
-            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.5 (Build 2026.01.13)</p>
+            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.6 (Auto-Sync)</p>
         </div>
       </div>
     </aside>
@@ -134,14 +136,32 @@ const Sidebar = () => {
 
 const Header = ({ title }: { title: string }) => {
   const [dbStatus, setDbStatus] = useState<'CONNECTED' | 'DISCONNECTED' | 'UNKNOWN'>('UNKNOWN');
+  const [syncCount, setSyncCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
-    // 초기 로드 시 상태 확인
     checkStatus();
-    // 주기적으로 상태 체크 (선택 사항)
-    const interval = setInterval(checkStatus, 5000);
+    // 5초마다 연결 상태 및 대기열 확인
+    const interval = setInterval(async () => {
+        checkStatus();
+        
+        // 백그라운드 동기화 시도
+        const pendingItems = JSON.parse(localStorage.getItem('po_pending_markets') || '[]');
+        setSyncCount(pendingItems.length);
+
+        if (pendingItems.length > 0 && !isSyncing) {
+            setIsSyncing(true);
+            const synced = await mockSupabase.db.markets.syncPendingItems();
+            if (synced > 0) {
+                console.log(`✅ Synced ${synced} items to DB`);
+                // 동기화 성공 시 화면 갱신을 위해 이벤트 발생 가능 (지금은 생략)
+            }
+            setIsSyncing(false);
+        }
+    }, 5000);
+
     return () => clearInterval(interval);
-  }, []);
+  }, [isSyncing]);
 
   const checkStatus = () => {
     const status = mockSupabase.getConnectionStatus();
@@ -159,8 +179,16 @@ const Header = ({ title }: { title: string }) => {
             : 'bg-amber-50 text-amber-600 border-amber-200'
         }`}>
             {dbStatus === 'CONNECTED' ? <Wifi size={12} /> : <WifiOff size={12} />}
-            {dbStatus === 'CONNECTED' ? 'Live DB' : 'Mock Mode'}
+            {dbStatus === 'CONNECTED' ? 'Live DB' : 'Offline Mode'}
         </div>
+
+        {/* Sync Status Badge */}
+        {syncCount > 0 && (
+             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 animate-pulse">
+                <CloudCog size={12} className={isSyncing ? "animate-spin" : ""} />
+                {isSyncing ? '동기화 중...' : `${syncCount}건 대기 중`}
+            </div>
+        )}
       </div>
       <div className="flex items-center gap-4">
         <div className="relative hidden md:block">
