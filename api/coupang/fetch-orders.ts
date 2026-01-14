@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import fetch from 'node-fetch'; // Proxy Agent 호환성을 위해 node-fetch 사용
+import fetch from 'node-fetch'; 
 import { HttpsProxyAgent } from 'https-proxy-agent';
 
 // Vercel Serverless Function 설정
@@ -11,6 +11,7 @@ export const config = {
 /**
  * Vercel Serverless Function for Coupang API Proxy
  * 환경변수 FIXED_IP_PROXY_URL이 설정되어 있으면 해당 프록시를 통해 요청을 보냅니다.
+ * node-fetch v2를 사용하여 Vercel 환경에서의 호환성 문제를 방지합니다.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS 설정
@@ -104,9 +105,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 5. 쿠팡 API 호출
     console.log(`[Coupang Proxy] Call: ${targetStatus} (${createdAtFrom} ~ ${createdAtTo})`);
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
+    // node-fetch v2는 AbortController 지원이 제한적일 수 있으므로 타임아웃은 fetch 옵션이나 별도 처리 필요하지만
+    // Vercel 함수 자체 타임아웃(10초)이 있으므로 여기서는 간단히 처리
+    
     const apiResponse = await fetch(url, {
         method: method,
         headers: {
@@ -115,11 +116,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'X-Requested-By': cleanVendorId,
             'X-Cou-Date': datetime
         },
-        agent: agent, // node-fetch의 agent 옵션 사용
-        signal: controller.signal as any // Type casting for node-fetch compatibility
+        agent: agent // node-fetch v2 지원 옵션
     });
-
-    clearTimeout(timeoutId);
 
     if (!apiResponse.ok) {
         const errorText = await apiResponse.text();
@@ -128,11 +126,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let hint = "";
         let currentIp = "";
 
-        // 403/401 에러 시 현재 IP 조회 (프록시가 있다면 프록시 IP가 조회됨)
+        // 403/401 에러 시 현재 IP 조회
         if (apiResponse.status === 403 || apiResponse.status === 401 || errorText.includes("Access Denied")) {
             try {
+                // 현재 IP 확인 요청
                 const ipRes = await fetch('https://api.ipify.org?format=json', {
-                    agent: agent // 동일한 조건(Proxy 유무)으로 IP 확인
+                    agent: agent
                 });
                 const ipData: any = await ipRes.json();
                 currentIp = ipData.ip;
@@ -197,7 +196,7 @@ function generateSignature(method: string, path: string, query: string, secretKe
 function maskUrl(url: string) {
     try {
         const u = new URL(url);
-        return `${u.protocol}//${u.host}`; // 인증 정보 숨김
+        return `${u.protocol}//${u.host}`;
     } catch {
         return 'Invalid URL';
     }
