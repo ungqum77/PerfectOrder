@@ -6,7 +6,6 @@ const STORAGE_KEYS = {
   USERS: 'po_users',
   SESSION: 'po_session',
   ORDERS: 'po_orders',
-  // PENDING_MARKETS: 'po_pending_markets' // [DEPRECATED] 더 이상 사용하지 않음
 };
 
 // UUID 생성 헬퍼
@@ -206,21 +205,10 @@ export const mockSupabase = {
         }
     },
     
-    // [DEPRECATED] 이전 버전의 복잡한 로직은 주석 처리하여 보존
-    /*
+    // =================================================================
+    // V3: Market Logic (Flat Table Structure)
+    // =================================================================
     markets: {
-        save: async (account: MarketAccount): Promise<{ success: boolean; mode: 'DB' | 'LOCAL' | 'OFFLINE_QUEUE'; message?: string }> => {
-            // ... (Old Sync Logic) ...
-        },
-        delete: async (id: string) => { ... },
-        get: async (): Promise<MarketAccount[]> => { ... },
-        syncPendingItems: async (): Promise<number> => { ... }
-    },
-    */
-
-    // [NEW] 단순하고 강력한 V2 로직
-    markets: {
-        // 동기화 로직을 대체하는 단순 Get
         get: async (): Promise<MarketAccount[]> => {
             if (!isSupabaseConfigured() || !supabase) return [];
             
@@ -242,27 +230,33 @@ export const mockSupabase = {
                 return [];
             }
 
+            // DB의 Flat Structure를 프론트엔드 UI용 Nested 구조로 매핑
             return data.map((item: any) => ({
                 id: item.id,
                 marketType: item.market_type,
                 accountName: item.account_name,
                 isActive: item.is_active,
                 createdAt: item.created_at,
+                // UI 호환성을 위한 역매핑
                 credentials: {
+                    // 공통
                     vendorId: item.vendor_id || '',
-                    // 프론트엔드 호환성을 위해 키 매핑
-                    accessKey: item.access_key,
-                    secretKey: item.secret_key,
-                    clientId: item.access_key, 
-                    clientSecret: item.secret_key, 
-                    apiKey: item.access_key,
-                    username: item.vendor_id, 
-                    password: item.secret_key, 
+                    username: item.vendor_id || '', // Gmarket 등
+                    
+                    // Key 1
+                    accessKey: item.access_key || '',
+                    clientId: item.access_key || '', // Naver
+                    apiKey: item.access_key || '', // 11st
+
+                    // Key 2
+                    secretKey: item.secret_key || '',
+                    clientSecret: item.secret_key || '', // Naver
+                    password: item.secret_key || '', // Gmarket
                 }
             }));
         },
 
-        // [핵심] 3번: Insert 로직을 회원가입처럼 간단하게 + 6번: 중복검사
+        // [New V3 Logic] 단순 Insert + 중복 검사
         saveSimple: async (account: MarketAccount): Promise<{ success: boolean; message?: string }> => {
             if (!isSupabaseConfigured() || !supabase) {
                 return { success: false, message: "DB가 연결되지 않았습니다." };
@@ -274,65 +268,94 @@ export const mockSupabase = {
 
             if (!userId) return { success: false, message: "로그인이 필요합니다." };
 
-            // 2. 데이터 준비 (Mapping)
+            // 2. 데이터 준비 (Mapping Flat Columns) & Sanitization
             const creds = account.credentials;
-            // 3번: 무결성 검사를 위한 Trim (이미 UI에서 했지만 한번 더 보장)
-            const clean = (s: string) => (s || '').trim();
+            // [강력한 정제 로직] UI와 로직 일치 (백엔드 방어)
+            const clean = (value: string) => {
+                if (!value) return "";
+                return value
+                    .normalize("NFKC")
+                    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+                    .replace(/\u00A0/g, " ")
+                    .replace(/[\r\n\t\u2028\u2029]/g, "")
+                    .replace(/\s+/g, "")
+                    .trim();
+            };
 
+            const accountName = clean(account.accountName);
             let vendorId = clean(creds.vendorId || creds.username);
             let key1 = clean(creds.accessKey || creds.apiKey || creds.clientId);
             let key2 = clean(creds.secretKey || creds.clientSecret || creds.password);
 
-            // 플랫폼별 키 매핑 보정
+            // 플랫폼별 키 매핑 보정 (한 번 더 확실하게)
             switch (account.marketType) {
-                case 'NAVER': key1 = clean(creds.clientId); key2 = clean(creds.clientSecret); break;
-                case 'COUPANG': vendorId = clean(creds.vendorId); key1 = clean(creds.accessKey); key2 = clean(creds.secretKey); break;
-                case '11ST': key1 = clean(creds.apiKey); break;
-                case 'GMARKET': case 'AUCTION': vendorId = clean(creds.username); key2 = clean(creds.password); break;
+                case 'NAVER': 
+                    key1 = clean(creds.clientId); 
+                    key2 = clean(creds.clientSecret); 
+                    break;
+                case 'COUPANG': 
+                    vendorId = clean(creds.vendorId); 
+                    key1 = clean(creds.accessKey); 
+                    key2 = clean(creds.secretKey); 
+                    break;
+                case '11ST': 
+                    key1 = clean(creds.apiKey); 
+                    break;
+                case 'GMARKET': 
+                case 'AUCTION': 
+                    vendorId = clean(creds.username); 
+                    key2 = clean(creds.password); 
+                    break;
             }
 
+            // 3. 중복 검사 (DB Select)
+            const { data: existingList, error: fetchError } = await supabase
+                .from('market_accounts')
+                .select('account_name, access_key, vendor_id, market_type')
+                .eq('user_id', userId);
+
+            if (fetchError) {
+                console.error(fetchError);
+                return { success: false, message: "중복 검사 중 오류가 발생했습니다." };
+            }
+            
+            if (existingList) {
+                const dupAlias = existingList.find((e: any) => e.account_name === accountName);
+                if (dupAlias) return { success: false, message: `이미 존재하는 별칭입니다: '${accountName}'` };
+
+                if (key1) {
+                    const dupKey = existingList.find((e: any) => e.market_type === account.marketType && e.access_key === key1);
+                    if (dupKey) return { success: false, message: "이미 등록된 API Key입니다." };
+                }
+                
+                if (vendorId) {
+                     const dupId = existingList.find((e: any) => e.market_type === account.marketType && e.vendor_id === vendorId);
+                     if (dupId) return { success: false, message: `이미 등록된 ID입니다: '${vendorId}'` };
+                }
+            }
+
+            // 4. Payload 구성
             const payload = {
                 id: account.id || generateUUID(),
                 user_id: userId,
                 market_type: account.marketType,
-                account_name: clean(account.accountName),
+                account_name: accountName,
                 is_active: true,
-                vendor_id: vendorId,
-                access_key: key1,
-                secret_key: key2,
+                vendor_id: vendorId, // marketid
+                access_key: key1,    // key1
+                secret_key: key2,    // key2
                 created_at: new Date().toISOString()
             };
 
-            // 6번: 중복 검사 (서버에서 가져와서 비교)
-            const { data: existingList } = await supabase
-                .from('market_accounts')
-                .select('account_name, access_key, vendor_id')
-                .eq('user_id', userId);
-            
-            if (existingList) {
-                // 별칭 중복 검사
-                const dupAlias = existingList.find((e: any) => e.account_name === payload.account_name);
-                if (dupAlias) return { success: false, message: `이미 존재하는 별칭입니다: ${payload.account_name}` };
+            // 5. 단순 INSERT & Error Handling
+            const { error: insertError } = await supabase.from('market_accounts').insert(payload);
 
-                // 키 중복 검사 (키가 있는 경우만)
-                if (key1) {
-                    const dupKey = existingList.find((e: any) => e.access_key === key1);
-                    if (dupKey) return { success: false, message: "이미 등록된 API Key(Access Key)입니다." };
-                }
-                
-                // ID 중복 검사 (ID가 있는 경우만)
-                if (vendorId) {
-                     // 같은 플랫폼 내에서만 ID 중복 체크 (지마켓/옥션 등)
-                     // 여기서는 단순화를 위해 일단 패스하거나, 필요시 추가
-                }
-            }
-
-            // 4번: 단순 INSERT (인증 없이 바로 때려넣기)
-            const { error } = await supabase.from('market_accounts').insert(payload);
-
-            if (error) {
-                console.error("DB Insert Error:", error);
-                return { success: false, message: `DB 저장 실패: ${error.message}` };
+            if (insertError) {
+                console.error("DB Insert Error Details:", insertError);
+                return { 
+                    success: false, 
+                    message: `저장 실패 [${insertError.code}]: ${insertError.message} ${insertError.details ? `(${insertError.details})` : ''}` 
+                };
             }
 
             return { success: true };
@@ -344,7 +367,7 @@ export const mockSupabase = {
             }
         },
 
-        // 하위 호환성을 위한 더미 함수 (에러 방지용)
+        // 하위 호환성을 위한 더미 함수
         syncPendingItems: async () => 0 
     },
 
