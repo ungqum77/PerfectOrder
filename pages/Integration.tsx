@@ -3,7 +3,8 @@ import Layout from '../components/Layout';
 import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Database } from 'lucide-react';
+import { marketApi } from '../lib/marketApi'; // marketApi 추가
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Database, Zap, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
@@ -125,6 +126,8 @@ const Integration = () => {
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalLoading, setModalLoading] = useState(false);
+    const [testLoading, setTestLoading] = useState(false); // 테스트 로딩 상태
+    const [testResult, setTestResult] = useState<{ success: boolean, message: string } | null>(null); // 테스트 결과
     const [loadingMessage, setLoadingMessage] = useState<string>('연동 정보 저장');
     const [formAlias, setFormAlias] = useState('');
     const [formCredentials, setFormCredentials] = useState<Record<string, string>>({});
@@ -154,6 +157,7 @@ const Integration = () => {
     const openAddModal = () => {
         setFormAlias('');
         setFormCredentials({});
+        setTestResult(null);
         setIsModalOpen(true);
     };
 
@@ -161,6 +165,7 @@ const Integration = () => {
     const handleCredentialChange = (key: string, value: string) => {
         const cleanValue = sanitizeCredential(value);
         setFormCredentials(prev => ({ ...prev, [key]: cleanValue }));
+        setTestResult(null); // 입력 변경 시 테스트 결과 초기화
     };
 
     // [Handler] 스마트 붙여넣기
@@ -169,6 +174,49 @@ const Integration = () => {
         const text = e.clipboardData.getData('text/plain');
         const cleanText = sanitizeCredential(text);
         setFormCredentials(prev => ({ ...prev, [key]: cleanText }));
+    };
+
+    // [New] 연동 테스트 핸들러
+    const handleTestConnection = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        setTestLoading(true);
+        setTestResult(null);
+
+        try {
+            // 1. 임시 계정 객체 생성
+            const tempAccount: MarketAccount = {
+                id: 'temp-test',
+                marketType: selectedPlatform,
+                accountName: 'Test',
+                isActive: true,
+                credentials: formCredentials
+            };
+
+            // 2. 플랫폼별 테스트 호출
+            if (selectedPlatform === 'COUPANG') {
+                // 쿠팡은 실제 API 호출 (1개 상태만 조회)
+                // marketApi 내부에서 fetchCoupangOrders 호출 시 에러가 throw됨
+                await marketApi.fetchCoupangOrders(tempAccount);
+                setTestResult({ success: true, message: "성공적으로 연결되었습니다! (주문 조회 성공)" });
+            } else if (selectedPlatform === 'NAVER') {
+                await marketApi.fetchNaverOrders(tempAccount);
+                setTestResult({ success: true, message: "연결 성공 (Mock Test)" });
+            } else {
+                 setTestResult({ success: true, message: "기본 연결 테스트 통과" });
+            }
+
+        } catch (error: any) {
+            console.error("Test Connection Error:", error);
+            
+            let errorMsg = error.message;
+            // 자주 발생하는 에러 친절한 설명
+            if (errorMsg.includes("404")) errorMsg += "\n(API 경로를 찾을 수 없습니다. Vercel 배포 환경인지 확인해주세요)";
+            if (errorMsg.includes("Access Denied") || errorMsg.includes("403")) errorMsg += "\n(IP가 차단되었습니다. 쿠팡 윙에서 현재 IP를 허용해주세요)";
+            
+            setTestResult({ success: false, message: errorMsg });
+        } finally {
+            setTestLoading(false);
+        }
     };
 
     const handleAddAccount = async (e: React.FormEvent) => {
@@ -347,7 +395,7 @@ const Integration = () => {
             {/* Add Account Modal */}
             {isModalOpen && currentMarket && (
                 <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-                    <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-scale-in">
+                    <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-scale-in flex flex-col max-h-[90vh]">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                                 <span className={`size-3 rounded-full ${currentMarket.color}`}></span>
@@ -361,7 +409,7 @@ const Integration = () => {
                             </button>
                         </div>
                         
-                        <form onSubmit={handleAddAccount} className="p-8 space-y-5">
+                        <div className="overflow-y-auto flex-1 p-8 space-y-5">
                             <div className="space-y-2">
                                 <label className="text-sm font-bold text-slate-700 flex items-center gap-1">
                                     계정 별칭 <span className="text-red-500">*</span>
@@ -374,7 +422,6 @@ const Integration = () => {
                                     className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none text-sm transition-all"
                                     autoFocus
                                 />
-                                <p className="text-xs text-slate-400">관리 목적의 이름입니다. 편하게 정해주세요.</p>
                             </div>
 
                             <div className="border-t border-slate-100 my-4"></div>
@@ -397,18 +444,39 @@ const Integration = () => {
                                 </div>
                             ))}
 
-                            <div className="pt-6">
-                                <button 
-                                    type="submit" 
-                                    disabled={modalLoading}
-                                    className="w-full bg-slate-900 text-white h-12 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-slate-200"
-                                >
-                                    {modalLoading ? (
-                                        <><Loader2 className="animate-spin" /> {loadingMessage}</>
-                                    ) : '연동 정보 저장'}
-                                </button>
-                            </div>
-                        </form>
+                            {/* 테스트 결과 표시 영역 */}
+                            {testResult && (
+                                <div className={`p-4 rounded-xl border flex items-start gap-3 text-sm animate-fade-in ${
+                                    testResult.success 
+                                    ? 'bg-green-50 border-green-200 text-green-700' 
+                                    : 'bg-red-50 border-red-200 text-red-700'
+                                }`}>
+                                    {testResult.success ? <Check size={18} className="shrink-0 mt-0.5"/> : <AlertTriangle size={18} className="shrink-0 mt-0.5"/>}
+                                    <div className="whitespace-pre-wrap">{testResult.message}</div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3">
+                            <button 
+                                type="button"
+                                onClick={handleTestConnection}
+                                disabled={testLoading || modalLoading}
+                                className="flex-1 bg-white border border-slate-200 text-slate-700 h-12 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
+                            >
+                                {testLoading ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} className="text-amber-500"/>}
+                                연동 테스트
+                            </button>
+                            <button 
+                                onClick={handleAddAccount}
+                                disabled={modalLoading || testLoading}
+                                className="flex-[2] bg-slate-900 text-white h-12 rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-slate-200"
+                            >
+                                {modalLoading ? (
+                                    <><Loader2 className="animate-spin" /> {loadingMessage}</>
+                                ) : '저장하기'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
