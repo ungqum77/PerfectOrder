@@ -63,6 +63,51 @@ const NewOrders = () => {
         }
     }
 
+    // [New] 엑셀 다운로드 핸들러
+    const handleExcelDownload = () => {
+        if (!hasAccess) {
+             if (confirm("이 기능은 구독 회원 전용입니다. 구독 페이지로 이동하시겠습니까?")) {
+                navigate('/subscription');
+            }
+            return;
+        }
+
+        if (orders.length === 0) {
+            alert("다운로드할 주문이 없습니다.");
+            return;
+        }
+
+        // CSV 데이터 생성
+        const headers = ['주문번호', '판매처', '상품명', '옵션', '구매자', '결제금액', '상태', '주문일시'];
+        const rows = orders.map(o => [
+            o.orderNumber,
+            o.platform,
+            o.productName,
+            o.option,
+            o.customerName,
+            o.amount,
+            o.status,
+            o.date
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(r => r.map(c => `"${c}"`).join(',')) // 값에 쉼표가 있을 수 있으므로 따옴표 처리
+        ].join('\n');
+
+        // BOM(Byte Order Mark) 추가하여 엑셀에서 한글 깨짐 방지
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        
+        // 다운로드 링크 생성 및 클릭
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `new_orders_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     const getPlatformName = (platform: string) => {
         switch(platform) {
             case 'NAVER': return '네이버';
@@ -92,6 +137,7 @@ const NewOrders = () => {
                         <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
                     </button>
                     <button 
+                        onClick={handleExcelDownload}
                         className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm transition-all ${
                             hasAccess 
                             ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200" 

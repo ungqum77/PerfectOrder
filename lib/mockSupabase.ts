@@ -1,6 +1,7 @@
 import { User, UserRole, PlanType, MarketAccount, Order, OrderStatus } from '../types';
 import { MOCK_ORDERS } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabase';
+import { marketApi } from './marketApi';
 
 const STORAGE_KEYS = {
   USERS: 'po_users',
@@ -226,48 +227,37 @@ export const mockSupabase = {
             const { data, error } = await supabase.from('market_accounts').select('*').eq('user_id', userId);
             
             if (error) {
-                // 테이블이 없을 때(42P01) 조용히 빈 배열 반환 (사용자 경험 고려)
                 console.error("DB Fetch Error:", error);
                 return [];
             }
 
-            // DB의 Flat Structure를 프론트엔드 UI용 Nested 구조로 매핑
             return data.map((item: any) => ({
                 id: item.id,
                 marketType: item.market_type,
                 accountName: item.account_name,
                 isActive: item.is_active,
                 createdAt: item.created_at,
-                // UI 호환성을 위한 역매핑
                 credentials: {
-                    // 공통
                     vendorId: item.vendor_id || '',
-                    username: item.vendor_id || '', // Gmarket 등
-                    
-                    // Key 1
+                    username: item.vendor_id || '',
                     accessKey: item.access_key || '',
-                    clientId: item.access_key || '', // Naver
-                    apiKey: item.access_key || '', // 11st
-
-                    // Key 2
+                    clientId: item.access_key || '',
+                    apiKey: item.access_key || '',
                     secretKey: item.secret_key || '',
-                    clientSecret: item.secret_key || '', // Naver
-                    password: item.secret_key || '', // Gmarket
+                    clientSecret: item.secret_key || '',
+                    password: item.secret_key || '',
                 }
             }));
         },
 
-        // [New V3 Logic] 단순 Insert + 중복 검사
         saveSimple: async (account: MarketAccount): Promise<{ success: boolean; message?: string }> => {
             if (!isSupabaseConfigured() || !supabase) {
                 return { success: false, message: "DB 클라이언트가 초기화되지 않았습니다. (Code: CLIENT_ERR)" };
             }
 
-            // 1. 유저 확인
             const { data: { user } } = await supabase.auth.getUser();
             let userId = user?.id || mockSupabase.auth.getSession()?.id;
             
-            // 만약 유저 정보를 못 가져왔다면 세션 한번 더 확인
             if (!userId) {
                  const session = await supabase.auth.getSession();
                  userId = session.data.session?.user?.id;
@@ -275,25 +265,14 @@ export const mockSupabase = {
 
             if (!userId) return { success: false, message: "로그인이 필요합니다." };
 
-            // 2. 데이터 준비 & Sanitization (Integration.tsx에서도 하지만 한번 더 수행)
             const creds = account.credentials;
-            const clean = (value: string) => {
-                if (!value) return "";
-                return value
-                    .normalize("NFKC")
-                    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-                    .replace(/\u00A0/g, " ")
-                    .replace(/[\r\n\t\u2028\u2029]/g, "")
-                    .replace(/\s+/g, "")
-                    .trim();
-            };
+            const clean = (value: string) => value ? value.trim() : "";
 
             const accountName = clean(account.accountName);
             let vendorId = clean(creds.vendorId || creds.username);
             let key1 = clean(creds.accessKey || creds.apiKey || creds.clientId);
             let key2 = clean(creds.secretKey || creds.clientSecret || creds.password);
 
-            // 플랫폼별 키 매핑 보정
             switch (account.marketType) {
                 case 'NAVER': 
                     key1 = clean(creds.clientId); 
@@ -314,57 +293,31 @@ export const mockSupabase = {
                     break;
             }
 
-            // 3. 중복 검사 (DB Select)
-            const { data: existingList, error: fetchError } = await supabase
+            const { data: existingList } = await supabase
                 .from('market_accounts')
-                .select('account_name, access_key, vendor_id, market_type')
+                .select('account_name')
                 .eq('user_id', userId);
 
-            // [Error Handling] 테이블이 없으면 여기서 42P01 에러가 발생
-            if (fetchError) {
-                console.error("Fetch Error:", fetchError);
-                if (fetchError.code === '42P01') {
-                     return { success: false, message: "DB 테이블(market_accounts)이 없습니다. 제공된 SQL 스크립트를 Supabase SQL Editor에서 실행해주세요." };
-                }
-                return { success: false, message: `중복 검사 오류: ${fetchError.message}` };
-            }
-            
             if (existingList) {
                 const dupAlias = existingList.find((e: any) => e.account_name === accountName);
                 if (dupAlias) return { success: false, message: `이미 존재하는 별칭입니다: '${accountName}'` };
-
-                if (key1) {
-                    const dupKey = existingList.find((e: any) => e.market_type === account.marketType && e.access_key === key1);
-                    if (dupKey) return { success: false, message: "이미 등록된 API Key입니다." };
-                }
-                
-                if (vendorId) {
-                     const dupId = existingList.find((e: any) => e.market_type === account.marketType && e.vendor_id === vendorId);
-                     if (dupId) return { success: false, message: `이미 등록된 ID입니다: '${vendorId}'` };
-                }
             }
 
-            // 4. Payload 구성 (user_id 명시적 포함)
             const payload = {
                 id: account.id || generateUUID(),
-                user_id: userId, // 여기서 주입해야 NOT NULL 에러 방지
+                user_id: userId,
                 market_type: account.marketType,
                 account_name: accountName,
                 is_active: true,
-                vendor_id: vendorId, // marketid
-                access_key: key1,    // key1
-                secret_key: key2,    // key2
+                vendor_id: vendorId,
+                access_key: key1,
+                secret_key: key2,
                 created_at: new Date().toISOString()
             };
 
-            // 5. 단순 INSERT & Error Handling
             const { error: insertError } = await supabase.from('market_accounts').insert(payload);
 
             if (insertError) {
-                console.error("DB Insert Error Details:", insertError);
-                 if (insertError.code === '42P01') {
-                     return { success: false, message: "DB 테이블(market_accounts)이 존재하지 않습니다. SQL Editor에서 테이블을 생성해주세요." };
-                }
                 return { 
                     success: false, 
                     message: `저장 실패 [${insertError.code}]: ${insertError.message}` 
@@ -380,7 +333,6 @@ export const mockSupabase = {
             }
         },
 
-        // 하위 호환성을 위한 더미 함수
         syncPendingItems: async () => 0 
     },
 
@@ -403,6 +355,39 @@ export const mockSupabase = {
             let orders: Order[] = str ? JSON.parse(str) : MOCK_ORDERS;
             orders = orders.map(order => orderIds.includes(order.id) ? { ...order, status: newStatus } : order);
             localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(orders));
+        },
+        // [NEW] 외부 마켓 주문 동기화 함수
+        syncExternalOrders: async () => {
+            // 1. 등록된 마켓 계정 가져오기
+            const accounts = await mockSupabase.db.markets.get();
+            if (accounts.length === 0) return 0;
+
+            try {
+                // 2. 외부 API를 통해 주문 수집
+                const newOrders = await marketApi.syncAllMarkets(accounts);
+                if (newOrders.length === 0) return 0;
+
+                // 3. 기존 데이터와 병합 (중복 제거)
+                const str = localStorage.getItem(STORAGE_KEYS.ORDERS);
+                let currentOrders: Order[] = str ? JSON.parse(str) : MOCK_ORDERS;
+                
+                let addedCount = 0;
+                newOrders.forEach(newOrder => {
+                    // 주문번호와 플랫폼이 같은 주문이 있는지 확인
+                    const exists = currentOrders.some(o => o.orderNumber === newOrder.orderNumber && o.platform === newOrder.platform);
+                    if (!exists) {
+                        currentOrders.unshift(newOrder); // 최신 주문이 위로 오도록 추가
+                        addedCount++;
+                    }
+                });
+
+                // 4. 로컬 스토리지 업데이트
+                localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(currentOrders));
+                return addedCount;
+            } catch (e) {
+                console.error("Sync Error:", e);
+                return 0;
+            }
         }
     }
   }

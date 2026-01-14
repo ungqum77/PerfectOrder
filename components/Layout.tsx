@@ -145,27 +145,36 @@ const Header = ({ title }: { title: string }) => {
     const interval = setInterval(async () => {
         checkStatus();
         
-        // 백그라운드 동기화 시도
+        // 백그라운드 동기화 시도 (Optional)
         const pendingItems = JSON.parse(localStorage.getItem('po_pending_markets') || '[]');
         setSyncCount(pendingItems.length);
-
-        if (pendingItems.length > 0 && !isSyncing) {
-            setIsSyncing(true);
-            const synced = await mockSupabase.db.markets.syncPendingItems();
-            if (synced > 0) {
-                console.log(`✅ Synced ${synced} items to DB`);
-                // 동기화 성공 시 화면 갱신을 위해 이벤트 발생 가능 (지금은 생략)
-            }
-            setIsSyncing(false);
-        }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [isSyncing]);
+  }, []);
 
   const checkStatus = () => {
     const status = mockSupabase.getConnectionStatus();
     setDbStatus(status);
+  };
+
+  const handleManualSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+        const count = await mockSupabase.db.orders.syncExternalOrders();
+        if (count > 0) {
+            alert(`${count}건의 신규 주문을 가져왔습니다.`);
+            window.location.reload();
+        } else {
+            alert("신규 주문이 없습니다.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("동기화 중 오류가 발생했습니다.");
+    } finally {
+        setIsSyncing(false);
+    }
   };
 
   return (
@@ -185,8 +194,8 @@ const Header = ({ title }: { title: string }) => {
         {/* Sync Status Badge */}
         {syncCount > 0 && (
              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 animate-pulse">
-                <CloudCog size={12} className={isSyncing ? "animate-spin" : ""} />
-                {isSyncing ? '동기화 중...' : `${syncCount}건 대기 중`}
+                <CloudCog size={12} />
+                {syncCount}건 대기 중
             </div>
         )}
       </div>
@@ -205,11 +214,12 @@ const Header = ({ title }: { title: string }) => {
           <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white"></span>
         </button>
         <button 
-            onClick={() => window.location.reload()}
-            className="flex items-center justify-center gap-2 rounded-lg h-10 px-4 bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200"
+            onClick={handleManualSync}
+            disabled={isSyncing}
+            className="flex items-center justify-center gap-2 rounded-lg h-10 px-4 bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200 disabled:opacity-70 disabled:cursor-wait"
         >
-          <RefreshCw size={16} />
-          <span>동기화</span>
+          <RefreshCw size={16} className={isSyncing ? "animate-spin" : ""} />
+          <span>{isSyncing ? '동기화 중...' : '동기화'}</span>
         </button>
       </div>
     </header>
