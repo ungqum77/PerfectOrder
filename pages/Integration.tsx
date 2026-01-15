@@ -694,7 +694,8 @@ const Integration = () => {
 
                                             {/* 실제 사용된 키 값 표시 (디버깅용) */}
                                             {testResult.details.usedCredentials && (
-                                                <div className="bg-slate-100 p-2 rounded border border-slate-200 mt-1 font-mono text-[10px] text-slate-600 break-all">
+                                                <div className="bg-yellow-50 p-2 rounded border border-yellow-200 mt-2 font-mono text-[10px] text-yellow-800 break-all">
+                                                    <div className="font-bold mb-1 text-yellow-900 border-b border-yellow-200 pb-1">실제 전송된 자격증명</div>
                                                     <div><strong>Vendor ID:</strong> {testResult.details.usedCredentials.vendorId}</div>
                                                     <div><strong>Access Key:</strong> {testResult.details.usedCredentials.accessKey}</div>
                                                     <div><strong>Secret Key:</strong> {testResult.details.usedCredentials.secretKey}</div>

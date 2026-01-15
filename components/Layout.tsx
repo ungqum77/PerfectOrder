@@ -51,6 +51,9 @@ const Sidebar = () => {
     menuItems.push({ path: "/admin", label: "관리자 설정", icon: ShieldAlert });
   }
 
+  // 빌드 타임 (MM.DD.HH.MM)
+  const buildVersion = "1.0.9 (05.24.16.30)";
+
   return (
     <aside className="w-64 border-r border-slate-200 bg-white flex flex-col fixed h-full z-50 shadow-sm">
       <div className="p-6">
@@ -127,7 +130,7 @@ const Sidebar = () => {
         
         {/* Version Info */}
         <div className="text-center">
-            <p className="text-[10px] text-slate-300 font-mono">ver 1.0.8 (Axios & Today)</p>
+            <p className="text-[10px] text-slate-300 font-mono">ver {buildVersion}</p>
         </div>
       </div>
     </aside>

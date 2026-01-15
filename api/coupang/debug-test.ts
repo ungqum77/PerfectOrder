@@ -18,10 +18,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 1. 숨겨진 문자 제거 및 공백 제거 함수
+  // 1. 숨겨진 문자, 공백, 따옴표 제거 함수 (입력값 정제 강화)
   const clean = (str: any) => {
       if (!str) return "";
-      return String(str).replace(/\s+/g, '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+      return String(str)
+        .replace(/\s+/g, '') // 공백 제거
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') // 투명 문자 제거
+        .replace(/['"“”‘’]/g, '') // 따옴표 제거
+        .trim();
   }
   
   // 2. 환경변수에서 Proxy URL 가져오기
@@ -30,13 +34,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
   let currentIp = 'Unknown';
 
-  // 3. 자격 증명 변수 선언 (스코프 확보)
+  // 3. 자격 증명 변수 선언
   let VENDOR_ID = "";
   let ACCESS_KEY = "";
   let SECRET_KEY = "";
 
   try {
-      // IP 확인 (Proxy 적용)
+      // IP 확인
       try {
         const ipRes = await axios.get('https://api.ipify.org?format=json', { 
             httpsAgent, 
@@ -62,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ACCESS_KEY = clean(body.accessKey) || DEFAULT_ACCESS;
       SECRET_KEY = clean(body.secretKey) || DEFAULT_SECRET;
 
-      // 키 값 검증 로직
+      // 키 값 검증
       if (!VENDOR_ID) throw new Error("Vendor ID가 유효하지 않습니다.");
       if (!ACCESS_KEY) throw new Error("Access Key가 유효하지 않습니다.");
       if (!SECRET_KEY) throw new Error("Secret Key가 유효하지 않습니다.");
@@ -85,12 +89,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fmt = (date: Date) => date.toISOString().split('T')[0];
       const cFrom = fmt(nowKst);
       const cTo = fmt(nextDayKst);
-      const status = 'ACCEPT'; // 결제 완료 상태 조회
+      const status = 'ACCEPT'; 
 
       const queryString = `createdAtFrom=${cFrom}&createdAtTo=${cTo}&status=${status}`;
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${VENDOR_ID}/ordersheets`;
       
-      // 7. 서명 생성 (HMAC-SHA256)
+      // 7. 서명 생성
       const method = 'GET';
       const message = datetime + method + path + '?' + queryString;
       
@@ -98,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hmac.update(message);
       const signature = hmac.digest('hex');
 
-      console.log(`[Debug] IP: ${currentIp} | Vendor: ${VENDOR_ID} | Key: ${ACCESS_KEY.substring(0, 5)}...`);
+      console.log(`[Debug] Checking Coupang... IP:${currentIp}, Vendor:${VENDOR_ID}`);
 
       // 8. API 호출
       const url = `https://api-gateway.coupang.com${path}?${queryString}`;
@@ -109,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               'X-Requested-By': VENDOR_ID,
               'X-Cou-Date': datetime,
           },
-          httpsAgent, // 프록시 에이전트 적용
+          httpsAgent, 
           proxy: false 
       });
 
@@ -131,15 +135,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const errorData = error.response?.data;
       const status = error.response?.status || 500;
       
-      // 에러 메시지 상세 분석
       let hint = "";
-      
       if (status === 401) {
-          hint = `❌ [401 인증 실패] 승인되지 않은 요청입니다.\n1. Vendor ID와 Access Key가 짝이 맞는지 확인하세요.\n2. Access Key가 Secret Key와 정확히 일치하는지 확인하세요.`;
+          hint = `❌ [401 인증 실패] 키 값 오류 또는 IP 차단.\n\n[진단 결과]\n1. Vendor ID, Access Key, Secret Key가 정확한지 아래 표시된 값을 확인하세요.\n2. 키가 정확하다면 쿠팡 OPEN API IP 설정에 [${currentIp}]가 등록되어 있는지 확인하세요.`;
       } else if (status === 403) {
-          hint = `⛔ [403 접근 차단] IP [${currentIp}]가 아직 쿠팡에 등록되지 않았습니다.\n쿠팡 윙에 이 IP를 등록하고 10분 뒤 다시 시도하세요.`;
+          hint = `⛔ [403 접근 차단] IP [${currentIp}]가 아직 쿠팡에 등록되지 않았습니다.`;
       } else if (!proxyUrl) {
-          hint = `⚠️ Vercel 환경변수 'FIXED_IP_PROXY_URL' 설정이 필요합니다.`;
+          hint = `⚠️ Proxy 설정 오류.`;
       }
 
       console.error(`[Debug Error] ${status}:`, JSON.stringify(errorData));
