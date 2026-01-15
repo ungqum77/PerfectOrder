@@ -218,7 +218,7 @@ const Integration = () => {
         const DEMO_CREDS = {
             vendorId: "A00934559",
             accessKey: "d21f5515-e7b1-4e4a-ab64-353ffde02371",
-            secretKey: "a4def843f98f80356a1bbe94b2c3d8270dd9fe0b"
+            secretKey: "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6"
         };
 
         // 1. 화면에 값 입력 (사용자 요청 반영: "위의 값들을 입력하게 해달라고")

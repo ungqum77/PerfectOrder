@@ -52,7 +52,7 @@ const Sidebar = () => {
   }
 
   // 빌드 타임 (YY.MM.DD.HH.MM.SS)
-  const buildVersion = "1.0.9 (25.05.24.17.15.30)";
+  const buildVersion = "1.0.9 (25.01.15.11.30.00)";
 
   return (
     <aside className="w-64 border-r border-slate-200 bg-white flex flex-col fixed h-full z-50 shadow-sm">

@@ -59,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // 사용자 제공 하드코딩 값 (요청하신 값)
       const DEFAULT_VENDOR = "A00934559";
       const DEFAULT_ACCESS = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
-      const DEFAULT_SECRET = "a4def843f98f80356a1bbe94b2c3d8270dd9fe0b";
+      const DEFAULT_SECRET = "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6";
 
       // 입력값이 있으면 사용하고, 없으면 하드코딩 값 사용
       VENDOR_ID = clean(body.vendorId) || DEFAULT_VENDOR;
