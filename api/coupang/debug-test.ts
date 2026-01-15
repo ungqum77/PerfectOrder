@@ -18,8 +18,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 1. 숨겨진 문자 제거 함수
-  const clean = (str: string) => {
+  // 1. 숨겨진 문자 제거 및 공백 제거 함수
+  const clean = (str: any) => {
       if (!str) return "";
       return String(str).replace(/\s+/g, '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
   }
@@ -42,29 +42,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } catch (e: any) { 
         console.error("IP check failed:", e.message);
         currentIp = "IP_CHECK_FAILED";
-        
-        if (proxyUrl) {
-            throw new Error(`프록시 연결 실패: 환경변수 FIXED_IP_PROXY_URL을 확인하세요.`);
-        }
       }
 
       // 4. 인증 정보 설정
       const body = req.body || {};
       
-      // [요청 반영] 사용자 제공 하드코딩 값 적용
-      // 입력값이 있으면 입력값 사용, 없으면 아래 하드코딩 값 사용 (강제 테스트용)
+      // [요청 반영] 사용자 제공 하드코딩 값 (강제 테스트용 기본값)
       const DEFAULT_VENDOR = "A00934559";
       const DEFAULT_ACCESS = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
       const DEFAULT_SECRET = "a4def843f98f80356a1bbe94b2c3d8270dd9fe0b";
 
-      const VENDOR_ID = clean(body.vendorId) || clean(DEFAULT_VENDOR);
-      const ACCESS_KEY = clean(body.accessKey) || clean(DEFAULT_ACCESS);
-      const SECRET_KEY = clean(body.secretKey) || clean(DEFAULT_SECRET);
+      // 입력값이 있으면 사용하고, 없으면 하드코딩 값 사용
+      const VENDOR_ID = clean(body.vendorId) || DEFAULT_VENDOR;
+      const ACCESS_KEY = clean(body.accessKey) || DEFAULT_ACCESS;
+      const SECRET_KEY = clean(body.secretKey) || DEFAULT_SECRET;
 
       // 키 값 검증 로직 강화
-      if (!VENDOR_ID) throw new Error("Vendor ID가 누락되었습니다.");
-      if (!ACCESS_KEY) throw new Error("Access Key가 누락되었습니다.");
-      if (!SECRET_KEY) throw new Error("Secret Key가 누락되었습니다.");
+      if (!VENDOR_ID) throw new Error("Vendor ID가 유효하지 않습니다.");
+      if (!ACCESS_KEY) throw new Error("Access Key가 유효하지 않습니다.");
+      if (!SECRET_KEY) throw new Error("Secret Key가 유효하지 않습니다.");
 
       // 5. 날짜 및 시간 생성
       const d = new Date();
@@ -76,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const ss = String(d.getUTCSeconds()).padStart(2, '0');
       const datetime = `${yy}${MM}${dd}T${HH}${mm}${ss}Z`;
 
-      // 6. 쿼리 스트링
+      // 6. 쿼리 스트링 (최근 2일간 조회)
       const nowKst = new Date(d.getTime() + (9 * 60 * 60 * 1000));
       const nextDayKst = new Date(nowKst);
       nextDayKst.setDate(nextDayKst.getDate() + 2);
@@ -84,12 +80,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const fmt = (date: Date) => date.toISOString().split('T')[0];
       const cFrom = fmt(nowKst);
       const cTo = fmt(nextDayKst);
-      const status = 'ACCEPT'; 
+      const status = 'ACCEPT'; // 결제 완료 상태 조회
 
       const queryString = `createdAtFrom=${cFrom}&createdAtTo=${cTo}&status=${status}`;
       const path = `/v2/providers/openapi/apis/api/v4/vendors/${VENDOR_ID}/ordersheets`;
       
-      // 7. 서명 생성
+      // 7. 서명 생성 (HMAC-SHA256)
       const method = 'GET';
       const message = datetime + method + path + '?' + queryString;
       
@@ -118,7 +114,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           data: response.data,
           currentIp: currentIp,
           proxyUsed: !!proxyUrl,
-          usedKey: ACCESS_KEY.substring(0, 8) + '****'
+          usedKey: ACCESS_KEY.substring(0, 8) + '****',
+          isDefaultKey: ACCESS_KEY === DEFAULT_ACCESS
       });
 
   } catch (error: any) {
@@ -129,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let hint = "";
       
       if (status === 401) {
-          hint = `❌ [401 인증 실패] 키 값이 틀렸거나 승인되지 않았습니다.\nAccess Key와 Secret Key가 정확한지 다시 한번 확인해주세요.\n(입력된 Key 앞자리: ${req.body.accessKey ? req.body.accessKey.substring(0,4) : 'Default'})`;
+          hint = `❌ [401 인증 실패] 키 값이 틀렸거나 승인되지 않았습니다.\nAccess Key와 Secret Key가 정확한지 다시 한번 확인해주세요.`;
       } else if (status === 403) {
           hint = `⛔ [403 접근 차단] IP [${currentIp}]가 아직 쿠팡에 등록되지 않았습니다.\n쿠팡 윙에 이 IP를 등록하고 10분 뒤 다시 시도하세요.`;
       } else if (!proxyUrl) {
