@@ -51,8 +51,8 @@ const Sidebar = () => {
     menuItems.push({ path: "/admin", label: "관리자 설정", icon: ShieldAlert });
   }
 
-  // 빌드 타임 (MM.DD.HH.MM)
-  const buildVersion = "1.0.9 (05.24.16.30)";
+  // 빌드 타임 (YY.MM.DD.HH.MM.SS)
+  const buildVersion = "1.0.9 (25.05.24.17.15.30)";
 
   return (
     <aside className="w-64 border-r border-slate-200 bg-white flex flex-col fixed h-full z-50 shadow-sm">

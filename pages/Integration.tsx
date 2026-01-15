@@ -209,16 +209,27 @@ const Integration = () => {
         }
     };
 
-    // [New] 입력된 값으로 디버그 테스트 (Proxy 적용)
+    // [New] 정밀 진단: 기본값 자동 입력 및 테스트
     const handleDebugWithInputs = async () => {
         setTestLoading(true);
         setTestResult(null);
 
+        // 요청하신 하드코딩 값 (테스트용 계정)
+        const DEMO_CREDS = {
+            vendorId: "A00934559",
+            accessKey: "d21f5515-e7b1-4e4a-ab64-353ffde02371",
+            secretKey: "a4def843f98f80356a1bbe94b2c3d8270dd9fe0b"
+        };
+
+        // 1. 화면에 값 입력 (사용자 요청 반영: "위의 값들을 입력하게 해달라고")
+        setFormCredentials(prev => ({ ...prev, ...DEMO_CREDS }));
+
         try {
+            // 2. 해당 값으로 서버 요청
             const response = await fetch('/api/coupang/debug-test', {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formCredentials) // 입력된 키 값 전송 (없으면 서버에서 기본값 사용)
+                body: JSON.stringify(DEMO_CREDS) // 현재 폼 상태가 아닌, 확정된 데모 값을 전송
             });
             
             const text = await response.text();
@@ -736,7 +747,7 @@ const Integration = () => {
                                     onClick={handleDebugWithInputs}
                                     className="w-full text-xs text-indigo-500 font-bold hover:underline flex items-center justify-center gap-1 mt-1 opacity-80 hover:opacity-100 bg-indigo-50 py-2 rounded-lg border border-indigo-100"
                                 >
-                                    <Stethoscope size={14} /> 정밀 진단 (입력값 없으면 기본값 테스트)
+                                    <Stethoscope size={14} /> 정밀 진단 (테스트 계정 자동 입력)
                                 </button>
                             )}
                         </div>
