@@ -23,6 +23,7 @@ export interface MarketAccount {
   marketType: Platform;
   accountName: string; // 별칭 (예: 쿠팡 1호점)
   credentials: Record<string, string>; // jsonb 대응 (apiKey, secretKey 등 유동적)
+  authMode?: 'API' | 'LOGIN'; // 인증 방식 (API Key 또는 ID/PW)
   isActive: boolean;
   createdAt?: string;
 }

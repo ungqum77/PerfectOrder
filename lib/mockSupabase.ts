@@ -236,6 +236,7 @@ export const mockSupabase = {
                 marketType: item.market_type,
                 accountName: item.account_name,
                 isActive: item.is_active,
+                authMode: item.auth_mode || 'API', // 기본값 API
                 createdAt: item.created_at,
                 credentials: {
                     vendorId: item.vendor_id || '',
@@ -272,25 +273,32 @@ export const mockSupabase = {
             let vendorId = clean(creds.vendorId || creds.username);
             let key1 = clean(creds.accessKey || creds.apiKey || creds.clientId);
             let key2 = clean(creds.secretKey || creds.clientSecret || creds.password);
-
-            switch (account.marketType) {
-                case 'NAVER': 
-                    key1 = clean(creds.clientId); 
-                    key2 = clean(creds.clientSecret); 
-                    break;
-                case 'COUPANG': 
-                    vendorId = clean(creds.vendorId); 
-                    key1 = clean(creds.accessKey); 
-                    key2 = clean(creds.secretKey); 
-                    break;
-                case '11ST': 
-                    key1 = clean(creds.apiKey); 
-                    break;
-                case 'GMARKET': 
-                case 'AUCTION': 
-                    vendorId = clean(creds.username); 
-                    key2 = clean(creds.password); 
-                    break;
+            
+            // authMode에 따라 저장할 키 필드 조정 (DB 스키마가 허용하는 범위 내에서)
+            if (account.authMode === 'LOGIN') {
+                vendorId = clean(creds.username);
+                key2 = clean(creds.password);
+                key1 = 'LOGIN_MODE'; // API Key가 없음을 표시
+            } else {
+                switch (account.marketType) {
+                    case 'NAVER': 
+                        key1 = clean(creds.clientId); 
+                        key2 = clean(creds.clientSecret); 
+                        break;
+                    case 'COUPANG': 
+                        vendorId = clean(creds.vendorId); 
+                        key1 = clean(creds.accessKey); 
+                        key2 = clean(creds.secretKey); 
+                        break;
+                    case '11ST': 
+                        key1 = clean(creds.apiKey); 
+                        break;
+                    case 'GMARKET': 
+                    case 'AUCTION': 
+                        vendorId = clean(creds.username); 
+                        key2 = clean(creds.password); 
+                        break;
+                }
             }
 
             const { data: existingList } = await supabase
@@ -312,6 +320,7 @@ export const mockSupabase = {
                 vendor_id: vendorId,
                 access_key: key1,
                 secret_key: key2,
+                auth_mode: account.authMode || 'API',
                 created_at: new Date().toISOString()
             };
 

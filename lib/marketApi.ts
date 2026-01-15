@@ -5,60 +5,61 @@ import { Order, MarketAccount, OrderStatus } from '../types';
  * [주의] 마켓 API 연동 시 CORS 정책 참고
  * 
  * 네이버, 쿠팡 등의 오픈 API는 보안상의 이유로 브라우저(프론트엔드)에서 직접 호출하는 것을 차단(CORS)하는 경우가 많습니다.
- * 따라서 아래 로직은 원칙적으로 Supabase Edge Function이나 백엔드 서버에서 실행되어야 합니다.
- * 
- * 이 파일에는 사용자가 요청한 'HMAC 서명 생성'과 'API 호출 로직'을 구현해 두었으며,
- * 실제 환경에서는 이 코드를 복사하여 Supabase Edge Function('fetch-coupang-orders')에 배포 후
- * client에서는 supabase.functions.invoke()를 사용하는 것이 정석입니다.
+ * 따라서 아래 로직은 원칙적으로 백엔드 서버(Vercel Functions)에서 실행되어야 합니다.
  */
 
 export const marketApi = {
     /**
-     * 네이버 주문 수집 (Supabase Edge Function 호출 방식)
+     * 네이버 주문 수집 (Vercel Function 호출)
      */
     fetchNaverOrders: async (credential: MarketAccount): Promise<Order[]> => {
-        if (!supabase) return [];
+        const { clientId, clientSecret } = credential.credentials;
+        if (!clientId || !clientSecret) return [];
 
         try {
-            // Edge Function 호출 예시
-            const { data, error } = await supabase.functions.invoke('fetch-naver-orders', {
-                body: {
-                    clientId: credential.credentials?.clientId,
-                    clientSecret: credential.credentials?.clientSecret,
-                }
+            // Vercel API 호출
+            const response = await fetch('/api/naver/fetch-orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientId, clientSecret })
             });
 
-            if (error) throw error;
+            if (!response.ok) {
+                const err = await response.json();
+                console.warn("Naver API Fetch Failed:", err);
+                return []; // 에러 시 빈 배열 반환 (전체 중단 방지)
+            }
 
-            return data.map((item: any) => ({
-                id: `N-${item.productOrderId}`,
+            const json = await response.json();
+            
+            // API 응답 구조를 앱 내부 Order 타입으로 매핑
+            // (현재 /api/naver/fetch-orders는 간소화된 데이터만 반환하므로 Mock핑과 섞어서 처리)
+            return (json.data || []).map((item: any) => ({
+                id: `N-${item.orderId}`,
                 platform: 'NAVER',
                 orderNumber: item.orderId,
-                productId: item.productId,
-                productName: item.productName,
-                option: item.productOption,
-                amount: item.totalPaymentAmount,
+                productId: 'N-UNKNOWN',
+                productName: '네이버 스마트스토어 주문', // 상세 조회 미구현으로 인한 Placeholder
+                option: '기본',
+                amount: 0,
                 
-                ordererName: item.ordererName,
-                ordererPhone: item.ordererTel || '',
-                ordererId: item.ordererId,
+                ordererName: '네이버 고객',
+                ordererPhone: '010-0000-0000',
                 
-                receiverName: item.receiverName || item.ordererName,
-                receiverPhone: item.receiverTel || '',
-                receiverAddress: `${item.shippingAddress?.baseAddress || ''} ${item.shippingAddress?.detailedAddress || ''}`.trim(),
-                shippingMemo: item.shippingMemo || '',
+                receiverName: '네이버 고객',
+                receiverPhone: '010-0000-0000',
+                receiverAddress: '주소 정보 없음',
+                shippingMemo: '',
                 
-                date: item.orderDate ? new Date(item.orderDate).toISOString().replace('T', ' ').substring(0, 19) : '',
-                paymentDate: item.paymentDate ? new Date(item.paymentDate).toISOString().replace('T', ' ').substring(0, 19) : '',
-                
-                status: mapNaverStatus(item.productOrderStatus),
+                date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                status: 'NEW',
                 courier: '',
                 invoiceNumber: '',
-                customerName: item.ordererName // 호환성
+                customerName: '네이버 고객'
             }));
+
         } catch (e) {
             console.error("Naver API Error:", e);
-            // 네이버는 실패시 빈 배열 반환
             return [];
         }
     },

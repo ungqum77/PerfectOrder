@@ -4,17 +4,17 @@ import { Platform, MarketAccount } from '../types';
 import { mockSupabase } from '../lib/mockSupabase';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { marketApi } from '../lib/marketApi';
-import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock, Bug, Network } from 'lucide-react';
+import { Check, Loader2, Plus, Trash2, Key, Store, X, ShieldCheck, Zap, AlertTriangle, Copy, Info, CheckCircle2, Clock, Bug, Network, Stethoscope, Lock, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 interface MarketInfo {
     platform: Platform;
     name: string;
-    authType: 'LOGIN' | 'API';
+    authType: 'LOGIN' | 'API' | 'BOTH'; 
     color: string;
     description: string;
     ipGuide?: boolean; // IP 설정 가이드 필요 여부
-    fields: { key: string, label: string, type?: string, placeholder?: string }[];
+    fields: Record<string, { key: string, label: string, type?: string, placeholder?: string }[]>; // 모드별 필드
 }
 
 const MARKETS: MarketInfo[] = [
@@ -24,23 +24,27 @@ const MARKETS: MarketInfo[] = [
         authType: 'API', 
         color: 'bg-green-500', 
         description: '네이버 커머스 API 센터에서 애플리케이션 등록 후 ID/Secret을 발급받으세요.',
-        fields: [
-            { key: 'clientId', label: '애플리케이션 ID (Client ID)', placeholder: 'API 센터에서 복사한 Client ID' },
-            { key: 'clientSecret', label: '애플리케이션 시크릿 (Client Secret)', type: 'password', placeholder: 'API 센터에서 복사한 Secret' }
-        ]
+        fields: {
+            'API': [
+                { key: 'clientId', label: '애플리케이션 ID (Client ID)', placeholder: 'API 센터에서 복사한 Client ID' },
+                { key: 'clientSecret', label: '애플리케이션 시크릿 (Client Secret)', type: 'password', placeholder: 'API 센터에서 복사한 Secret' }
+            ]
+        }
     },
     { 
         platform: 'COUPANG', 
         name: '쿠팡 윙', 
-        authType: 'API', 
+        authType: 'API', // [변경] BOTH -> API (보안 이슈로 로그인 방식 제거)
         color: 'bg-red-500', 
         description: '쿠팡 Wing 판매자 센터 > 판매자 정보 > 추가판매정보 > 오픈API 키 발급에서 확인하세요.',
-        ipGuide: true, // 쿠팡은 IP 설정이 필수이므로 가이드 표시
-        fields: [
-            { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00... 또는 C00... (필수)' },
-            { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
-            { key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: '쿠팡 API Secret Key' },
-        ]
+        ipGuide: true, // 쿠팡은 API 모드일 때 IP 설정이 필수
+        fields: {
+            'API': [
+                { key: 'vendorId', label: '업체 코드 (Vendor ID)', placeholder: 'A00... 또는 C00... (필수)' },
+                { key: 'accessKey', label: 'Access Key', placeholder: '쿠팡 API Access Key' },
+                { key: 'secretKey', label: 'Secret Key', type: 'password', placeholder: '쿠팡 API Secret Key' },
+            ]
+        }
     },
     { 
         platform: '11ST', 
@@ -48,9 +52,11 @@ const MARKETS: MarketInfo[] = [
         authType: 'API', 
         color: 'bg-red-600', 
         description: '11번가 오픈 API 센터(셀러 오피스)에서 API Key를 발급받으세요.',
-        fields: [
-            { key: 'apiKey', label: 'Open API Key', placeholder: '11번가 API Key' }
-        ]
+        fields: {
+            'API': [
+                { key: 'apiKey', label: 'Open API Key', placeholder: '11번가 API Key' }
+            ]
+        }
     },
     { 
         platform: 'GMARKET', 
@@ -58,10 +64,12 @@ const MARKETS: MarketInfo[] = [
         authType: 'LOGIN', 
         color: 'bg-emerald-600', 
         description: 'ESM PLUS 아이디와 비밀번호로 연동합니다.',
-        fields: [
-            { key: 'username', label: 'ESM Master ID', placeholder: 'ESM 아이디' },
-            { key: 'password', label: '비밀번호', type: 'password', placeholder: '비밀번호' }
-        ]
+        fields: {
+            'LOGIN': [
+                { key: 'username', label: 'ESM Master ID', placeholder: 'ESM 아이디' },
+                { key: 'password', label: '비밀번호', type: 'password', placeholder: '비밀번호' }
+            ]
+        }
     },
     { 
         platform: 'AUCTION', 
@@ -69,10 +77,12 @@ const MARKETS: MarketInfo[] = [
         authType: 'LOGIN', 
         color: 'bg-red-400', 
         description: 'ESM PLUS 아이디와 비밀번호로 연동합니다.',
-        fields: [
-            { key: 'username', label: 'ESM Master ID', placeholder: 'ESM 아이디' },
-            { key: 'password', label: '비밀번호', type: 'password', placeholder: '비밀번호' }
-        ]
+        fields: {
+            'LOGIN': [
+                { key: 'username', label: 'ESM Master ID', placeholder: 'ESM 아이디' },
+                { key: 'password', label: '비밀번호', type: 'password', placeholder: '비밀번호' }
+            ]
+        }
     },
 ];
 
@@ -121,12 +131,13 @@ const Integration = () => {
     
     // Modal State
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [authMode, setAuthMode] = useState<'API' | 'LOGIN'>('API'); // 현재 선택된 인증 모드
     const [modalLoading, setModalLoading] = useState(false);
     const [testLoading, setTestLoading] = useState(false); 
     const [testResult, setTestResult] = useState<{ 
         success: boolean; 
         message: string; 
-        details?: { ip?: string, count?: number, status?: string, proxy?: boolean } 
+        details?: { ip?: string, count?: number, status?: string, proxy?: boolean, usedKey?: string } 
     } | null>(null); 
     const [loadingMessage, setLoadingMessage] = useState<string>('연동 정보 저장');
     const [formAlias, setFormAlias] = useState('');
@@ -160,6 +171,14 @@ const Integration = () => {
         setFormCredentials({});
         setTestResult(null);
         setDetectedIp(null);
+        
+        // 마켓의 기본 인증 방식 설정
+        const market = MARKETS.find(m => m.platform === selectedPlatform);
+        if (market) {
+            if (market.authType === 'LOGIN') setAuthMode('LOGIN');
+            else setAuthMode('API');
+        }
+        
         setIsModalOpen(true);
     };
 
@@ -183,16 +202,22 @@ const Integration = () => {
         }
     };
 
-    // [New] 하드코딩된 값으로 테스트하는 함수
-    const handleDebugHardcodedTest = async () => {
-        if (!confirm("🚨 주의: 입력된 값 대신 서버에 하드코딩된 키 값과 '환경변수 프록시'로 테스트합니다.\n진행하시겠습니까?")) return;
+    // [New] 입력된 값으로 디버그 테스트 (Proxy 적용)
+    const handleDebugWithInputs = async () => {
+        // 유효성 검사
+        if (!formCredentials['vendorId'] || !formCredentials['accessKey'] || !formCredentials['secretKey']) {
+            alert("업체 코드, Access Key, Secret Key를 모두 입력해주세요.");
+            return;
+        }
 
         setTestLoading(true);
         setTestResult(null);
 
         try {
             const response = await fetch('/api/coupang/debug-test', {
-                method: 'POST', // POST or GET, endpoint uses POST usually or checks method
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formCredentials) // 입력된 키 값 전송
             });
             
             const text = await response.text();
@@ -203,13 +228,12 @@ const Integration = () => {
                 throw new Error(`Invalid JSON Response: ${text.substring(0, 100)}...`);
             }
             
-            // IP 정보 업데이트 (에러여도 IP는 중요함)
+            // IP 정보 업데이트
             if (json.currentIp && json.currentIp !== 'Unknown' && json.currentIp !== 'IP_CHECK_FAILED') {
                 setDetectedIp(json.currentIp);
             }
 
             if (!response.ok) {
-                 // 에러 발생 시 IP 정보를 hint에 포함하기 위해 json 객체를 넘김
                  if (json.currentIp) json.currentIp = json.currentIp;
                  throw new Error(formatErrorData(json));
             }
@@ -221,7 +245,8 @@ const Integration = () => {
                     ip: json.currentIp,
                     count: json.data?.length || 0,
                     status: 'DEBUG MODE',
-                    proxy: json.proxyUsed
+                    proxy: json.proxyUsed,
+                    usedKey: json.usedKey
                 }
             });
 
@@ -239,8 +264,8 @@ const Integration = () => {
     const handleTestConnection = async (e: React.MouseEvent) => {
         e.preventDefault();
 
-        // Vendor ID 유효성 검사 (쿠팡인 경우)
-        if (selectedPlatform === 'COUPANG') {
+        // Vendor ID 유효성 검사 (쿠팡 API 모드인 경우)
+        if (selectedPlatform === 'COUPANG' && authMode === 'API') {
             const vid = formCredentials['vendorId'] || '';
             if (!vid.toUpperCase().startsWith('A') && !vid.toUpperCase().startsWith('C')) {
                 alert("⚠️ 업체 코드(Vendor ID) 오류\n\n쿠팡 업체 코드는 보통 'A00...' 또는 'C00...'으로 시작합니다.\n로그인 아이디를 입력하신 게 아닌지 확인해주세요.");
@@ -257,11 +282,12 @@ const Integration = () => {
                 marketType: selectedPlatform,
                 accountName: 'Test',
                 isActive: true,
+                authMode: authMode,
                 credentials: formCredentials
             };
 
             if (selectedPlatform === 'COUPANG') {
-                // 쿠팡은 직접 Proxy API를 호출하여 상세 정보 획득
+                // 쿠팡 API 테스트
                 const { vendorId, accessKey, secretKey } = formCredentials;
                 const response = await fetch('/api/coupang/fetch-orders', {
                     method: 'POST',
@@ -347,7 +373,10 @@ const Integration = () => {
             const cleanCredentials: Record<string, string> = {};
             const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
 
-            currentMarket?.fields.forEach(field => {
+            // 현재 모드에 맞는 필드만 저장
+            const targetFields = currentMarket?.fields[authMode] || [];
+
+            targetFields.forEach(field => {
                 const val = formCredentials[field.key] || "";
                 const cleanVal = sanitizeCredential(val); 
                 if (!cleanVal) throw new Error(`${field.label}을(를) 입력해주세요.`);
@@ -358,6 +387,7 @@ const Integration = () => {
                 marketType: selectedPlatform,
                 accountName: cleanAlias,
                 credentials: cleanCredentials, 
+                authMode: authMode,
                 isActive: true
             };
             
@@ -389,6 +419,7 @@ const Integration = () => {
 
     const currentMarket = MARKETS.find(m => m.platform === selectedPlatform);
     const accountsForCurrentPlatform = myAccounts.filter(m => m.marketType === selectedPlatform);
+    const currentFields = currentMarket?.fields[authMode] || [];
 
     return (
         <Layout title="마켓 계정 연동">
@@ -472,6 +503,9 @@ const Integration = () => {
                                                 <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
                                                     {acc.accountName}
                                                     {acc.isActive && <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full">Active</span>}
+                                                    <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded border border-slate-200">
+                                                        {acc.authMode === 'LOGIN' ? '아이디/비번' : 'API Key'}
+                                                    </span>
                                                 </h4>
                                                 <div className="flex items-center gap-4 mt-1">
                                                     <p className="text-xs text-slate-400 font-mono">ID: {acc.id.substring(0, 8)}...</p>
@@ -518,8 +552,30 @@ const Integration = () => {
                         </div>
                         
                         <div className="overflow-y-auto flex-1 p-8 space-y-5">
-                            {/* [IP Guide] 쿠팡 전용 IP 가이드 */}
-                            {currentMarket.ipGuide && (
+                            {/* [Auth Type Toggle] */}
+                            {currentMarket.authType === 'BOTH' && (
+                                <div className="flex p-1 bg-slate-100 rounded-xl mb-4">
+                                    <button 
+                                        onClick={() => setAuthMode('API')}
+                                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${authMode === 'API' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <div className="flex items-center justify-center gap-1">
+                                            <Key size={14} /> 오픈 API Key
+                                        </div>
+                                    </button>
+                                    <button 
+                                        onClick={() => setAuthMode('LOGIN')}
+                                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${authMode === 'LOGIN' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        <div className="flex items-center justify-center gap-1">
+                                            <User size={14} /> 아이디/비밀번호
+                                        </div>
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* [IP Guide] 쿠팡 전용 IP 가이드 (API 모드일 때만) */}
+                            {currentMarket.ipGuide && authMode === 'API' && (
                                 <div className={`border rounded-xl p-4 mb-4 transition-colors ${detectedIp ? 'bg-indigo-50 border-indigo-200' : 'bg-blue-50 border-blue-100'}`}>
                                     <div className="flex items-start gap-3">
                                         <div className={`p-1 rounded mt-0.5 ${detectedIp ? 'bg-indigo-100 text-indigo-600' : 'bg-blue-100 text-blue-600'}`}>
@@ -547,22 +603,10 @@ const Integration = () => {
                                                             <Copy size={12} /> 복사
                                                         </button>
                                                     </div>
-                                                    <div className="flex items-start gap-2 text-[11px] text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100">
-                                                        <Clock size={12} className="mt-0.5 shrink-0" />
-                                                        <span>주의: 쿠팡 윙에 IP 등록 후 서버에 반영되기까지 약 10분이 소요됩니다. 즉시 테스트 시 에러가 발생할 수 있습니다.</span>
-                                                    </div>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
-                                </div>
-                            )}
-
-                             {/* Vendor ID Warning */}
-                            {currentMarket.platform === 'COUPANG' && (
-                                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-800">
-                                    <span className="font-bold">⚠️ 주의:</span> 로그인 아이디가 아닙니다. 
-                                    쿠팡 윙 상단에 있는 <strong>A00... 또는 C00...</strong> 형식의 업체 코드를 입력하세요.
                                 </div>
                             )}
 
@@ -581,7 +625,7 @@ const Integration = () => {
 
                             <div className="border-t border-slate-100 my-4"></div>
 
-                            {currentMarket.fields.map((field) => (
+                            {currentFields.map((field) => (
                                 <div key={field.key} className="space-y-2">
                                     <label className="text-sm font-bold text-slate-700 flex items-center gap-1">
                                         {field.label} <span className="text-red-500">*</span>
@@ -611,12 +655,14 @@ const Integration = () => {
                                     
                                     {testResult.details && (
                                         <div className="mt-3 pt-3 border-t border-green-200/50 flex flex-wrap gap-4 text-xs font-medium opacity-80">
-                                            <span>📡 IP: {testResult.details.ip || 'Unknown'}</span>
-                                            {/* Proxy 상태 표시 */}
-                                            <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
-                                                <Network size={12}/> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
-                                            </span>
-                                            <span>🔍 발견: {testResult.details.count}건</span>
+                                            {testResult.details.ip && <span>📡 IP: {testResult.details.ip}</span>}
+                                            {testResult.details.proxy !== undefined && (
+                                                <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                                    <Network size={12}/> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
+                                                </span>
+                                            )}
+                                            {testResult.details.usedKey && <span>🔑 Key: {testResult.details.usedKey}</span>}
+                                            {testResult.details.count !== undefined && <span>🔍 발견: {testResult.details.count}건</span>}
                                         </div>
                                     )}
                                 </div>
@@ -632,7 +678,7 @@ const Integration = () => {
                                     className="flex-1 bg-white border border-slate-200 text-slate-700 h-12 rounded-xl font-bold hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
                                 >
                                     {testLoading ? <Loader2 className="animate-spin" size={18} /> : <Zap size={18} className="text-amber-500"/>}
-                                    연동 테스트
+                                    {authMode === 'LOGIN' ? '로그인 테스트' : '연동 테스트'}
                                 </button>
                                 <button 
                                     onClick={handleAddAccount}
@@ -645,14 +691,14 @@ const Integration = () => {
                                 </button>
                             </div>
                             
-                            {/* 하드코딩 테스트 버튼 추가 (쿠팡일 때만 표시) */}
-                            {selectedPlatform === 'COUPANG' && (
+                            {/* 하드코딩 테스트 버튼 대신 정밀 테스트 버튼 (입력값 사용) */}
+                            {selectedPlatform === 'COUPANG' && authMode === 'API' && (
                                 <button
                                     type="button"
-                                    onClick={handleDebugHardcodedTest}
-                                    className="w-full text-xs text-red-500 font-medium hover:underline flex items-center justify-center gap-1 mt-1 opacity-70 hover:opacity-100"
+                                    onClick={handleDebugWithInputs}
+                                    className="w-full text-xs text-indigo-500 font-bold hover:underline flex items-center justify-center gap-1 mt-1 opacity-80 hover:opacity-100 bg-indigo-50 py-2 rounded-lg border border-indigo-100"
                                 >
-                                    <Bug size={12} /> 🚨 강제 하드코딩 테스트 (Debug)
+                                    <Stethoscope size={14} /> 입력된 정보로 정밀 진단 (Proxy 적용)
                                 </button>
                             )}
                         </div>
