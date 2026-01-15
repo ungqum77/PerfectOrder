@@ -137,7 +137,14 @@ const Integration = () => {
     const [testResult, setTestResult] = useState<{ 
         success: boolean; 
         message: string; 
-        details?: { ip?: string, count?: number, status?: string, proxy?: boolean, usedKey?: string, isDefaultKey?: boolean } 
+        details?: { 
+            ip?: string, 
+            count?: number, 
+            status?: string, 
+            proxy?: boolean, 
+            usedCredentials?: { vendorId: string, accessKey: string, secretKey: string },
+            isDefaultKey?: boolean 
+        } 
     } | null>(null); 
     const [loadingMessage, setLoadingMessage] = useState<string>('연동 정보 저장');
     const [formAlias, setFormAlias] = useState('');
@@ -204,9 +211,6 @@ const Integration = () => {
 
     // [New] 입력된 값으로 디버그 테스트 (Proxy 적용)
     const handleDebugWithInputs = async () => {
-        // [수정] 입력값이 없어도 테스트 가능하도록 (하드코딩 테스트)
-        // const hasInputs = formCredentials['vendorId'] && formCredentials['accessKey'] && formCredentials['secretKey'];
-        
         setTestLoading(true);
         setTestResult(null);
 
@@ -232,7 +236,21 @@ const Integration = () => {
 
             if (!response.ok) {
                  if (json.currentIp) json.currentIp = json.currentIp;
-                 throw new Error(formatErrorData(json));
+                 
+                 // 에러 상황에서도 사용된 키 값을 보여주기 위해 testResult에 부분 정보 저장
+                 if (json.usedCredentials) {
+                    setTestResult({
+                        success: false,
+                        message: formatErrorData(json),
+                        details: {
+                            ip: json.currentIp,
+                            usedCredentials: json.usedCredentials
+                        }
+                    });
+                    throw new Error("API 요청 실패 (아래 상세 정보 확인)"); // 중복 Alert 방지를 위해 throw 하되 UI는 이미 설정됨
+                 } else {
+                    throw new Error(formatErrorData(json));
+                 }
             }
 
             setTestResult({
@@ -243,17 +261,20 @@ const Integration = () => {
                     count: json.data?.length || 0,
                     status: 'DEBUG MODE',
                     proxy: json.proxyUsed,
-                    usedKey: json.usedKey,
+                    usedCredentials: json.usedCredentials,
                     isDefaultKey: json.isDefaultKey
                 }
             });
 
         } catch (e: any) {
             console.error(e);
-            setTestResult({
-                success: false,
-                message: `❌ 테스트 실패:\n${e.message}`
-            });
+            // 이미 위에서 setTestResult를 호출하지 않은 경우에만 여기서 호출
+            if (!testResult) {
+                setTestResult((prev) => prev || {
+                    success: false,
+                    message: `❌ 테스트 실패:\n${e.message}`
+                });
+            }
         } finally {
             setTestLoading(false);
         }
@@ -332,8 +353,6 @@ const Integration = () => {
 
             } else if (selectedPlatform === 'NAVER') {
                 const orders = await marketApi.fetchNaverOrders(tempAccount);
-                // marketApi는 오류시 빈 배열을 반환하므로, 정확한 테스트를 위해 직접 호출을 시도하는 것이 좋을 수 있으나,
-                // 일단 통합성을 위해 marketApi 유지하되 결과값으로 판단
                 if(orders.length >= 0) {
                      setTestResult({ 
                          success: true, 
@@ -661,16 +680,26 @@ const Integration = () => {
                                     </div>
                                     
                                     {testResult.details && (
-                                        <div className="mt-3 pt-3 border-t border-green-200/50 flex flex-wrap gap-4 text-xs font-medium opacity-80">
-                                            {testResult.details.ip && <span>📡 IP: {testResult.details.ip}</span>}
-                                            {testResult.details.proxy !== undefined && (
-                                                <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
-                                                    <Network size={12}/> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
-                                                </span>
+                                        <div className="mt-3 pt-3 border-t border-green-200/50 flex flex-col gap-2 text-xs font-medium opacity-90">
+                                            <div className="flex flex-wrap gap-4">
+                                                {testResult.details.ip && <span>📡 IP: {testResult.details.ip}</span>}
+                                                {testResult.details.proxy !== undefined && (
+                                                    <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
+                                                        <Network size={12}/> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
+                                                    </span>
+                                                )}
+                                                {testResult.details.count !== undefined && <span>🔍 발견: {testResult.details.count}건</span>}
+                                                {testResult.details.isDefaultKey && <span className="text-orange-600">⚠️ 기본 테스트 키 사용</span>}
+                                            </div>
+
+                                            {/* 실제 사용된 키 값 표시 (디버깅용) */}
+                                            {testResult.details.usedCredentials && (
+                                                <div className="bg-slate-100 p-2 rounded border border-slate-200 mt-1 font-mono text-[10px] text-slate-600 break-all">
+                                                    <div><strong>Vendor ID:</strong> {testResult.details.usedCredentials.vendorId}</div>
+                                                    <div><strong>Access Key:</strong> {testResult.details.usedCredentials.accessKey}</div>
+                                                    <div><strong>Secret Key:</strong> {testResult.details.usedCredentials.secretKey}</div>
+                                                </div>
                                             )}
-                                            {testResult.details.usedKey && <span>🔑 Key: {testResult.details.usedKey}</span>}
-                                            {testResult.details.count !== undefined && <span>🔍 발견: {testResult.details.count}건</span>}
-                                            {testResult.details.isDefaultKey && <span className="text-orange-600">⚠️ 기본 테스트 키 사용</span>}
                                         </div>
                                     )}
                                 </div>

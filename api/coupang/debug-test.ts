@@ -30,8 +30,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
   let currentIp = 'Unknown';
 
+  // 3. 자격 증명 변수 선언 (스코프 확보)
+  let VENDOR_ID = "";
+  let ACCESS_KEY = "";
+  let SECRET_KEY = "";
+
   try {
-      // 3. IP 확인 (Proxy 적용)
+      // IP 확인 (Proxy 적용)
       try {
         const ipRes = await axios.get('https://api.ipify.org?format=json', { 
             httpsAgent, 
@@ -47,17 +52,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // 4. 인증 정보 설정
       const body = req.body || {};
       
-      // [요청 반영] 사용자 제공 하드코딩 값 (강제 테스트용 기본값)
+      // 사용자 제공 하드코딩 값 (요청하신 값)
       const DEFAULT_VENDOR = "A00934559";
       const DEFAULT_ACCESS = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
       const DEFAULT_SECRET = "a4def843f98f80356a1bbe94b2c3d8270dd9fe0b";
 
       // 입력값이 있으면 사용하고, 없으면 하드코딩 값 사용
-      const VENDOR_ID = clean(body.vendorId) || DEFAULT_VENDOR;
-      const ACCESS_KEY = clean(body.accessKey) || DEFAULT_ACCESS;
-      const SECRET_KEY = clean(body.secretKey) || DEFAULT_SECRET;
+      VENDOR_ID = clean(body.vendorId) || DEFAULT_VENDOR;
+      ACCESS_KEY = clean(body.accessKey) || DEFAULT_ACCESS;
+      SECRET_KEY = clean(body.secretKey) || DEFAULT_SECRET;
 
-      // 키 값 검증 로직 강화
+      // 키 값 검증 로직
       if (!VENDOR_ID) throw new Error("Vendor ID가 유효하지 않습니다.");
       if (!ACCESS_KEY) throw new Error("Access Key가 유효하지 않습니다.");
       if (!SECRET_KEY) throw new Error("Secret Key가 유효하지 않습니다.");
@@ -110,11 +115,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       res.status(200).json({ 
           success: true, 
-          message: `✅ 인증 성공!\n\n현재 IP [${currentIp}]는 정상 허용 중입니다.\n제공된 키(${ACCESS_KEY.substring(0,6)}...)로 정상 연결되었습니다.`, 
+          message: `✅ 인증 성공!\n\n현재 IP [${currentIp}]는 정상 허용 중입니다.\nAPI 연결에 성공하였습니다.`, 
           data: response.data,
           currentIp: currentIp,
           proxyUsed: !!proxyUrl,
-          usedKey: ACCESS_KEY.substring(0, 8) + '****',
+          usedCredentials: {
+              vendorId: VENDOR_ID,
+              accessKey: ACCESS_KEY,
+              secretKey: SECRET_KEY
+          },
           isDefaultKey: ACCESS_KEY === DEFAULT_ACCESS
       });
 
@@ -126,7 +135,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let hint = "";
       
       if (status === 401) {
-          hint = `❌ [401 인증 실패] 키 값이 틀렸거나 승인되지 않았습니다.\nAccess Key와 Secret Key가 정확한지 다시 한번 확인해주세요.`;
+          hint = `❌ [401 인증 실패] 승인되지 않은 요청입니다.\n1. Vendor ID와 Access Key가 짝이 맞는지 확인하세요.\n2. Access Key가 Secret Key와 정확히 일치하는지 확인하세요.`;
       } else if (status === 403) {
           hint = `⛔ [403 접근 차단] IP [${currentIp}]가 아직 쿠팡에 등록되지 않았습니다.\n쿠팡 윙에 이 IP를 등록하고 10분 뒤 다시 시도하세요.`;
       } else if (!proxyUrl) {
@@ -140,6 +149,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           details: errorData || error.message,
           hint: hint,
           currentIp: currentIp,
+          usedCredentials: {
+              vendorId: VENDOR_ID,
+              accessKey: ACCESS_KEY,
+              secretKey: SECRET_KEY
+          },
           proxyConfigured: !!proxyUrl
       });
   }
