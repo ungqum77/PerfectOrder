@@ -209,27 +209,27 @@ const Integration = () => {
         }
     };
 
-    // [New] 정밀 진단: 기본값 자동 입력 및 테스트
+    // [New] 정밀 진단: 서버 하드코딩 값 사용
     const handleDebugWithInputs = async () => {
         setTestLoading(true);
         setTestResult(null);
 
-        // 요청하신 하드코딩 값 (테스트용 계정 - 최신값 적용)
+        // UI에 보여줄 값 (사용자 확인용)
         const DEMO_CREDS = {
             vendorId: "A00934559",
             accessKey: "d21f5515-e7b1-4e4a-ab64-353ffde02371",
             secretKey: "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6"
         };
-
-        // 1. 화면에 값 입력 (기존 값을 완전히 덮어쓰기하여 오타 제거)
         setFormCredentials(DEMO_CREDS);
 
         try {
-            // 2. 해당 값으로 서버 요청
+            // [중요] useHardcoded: true를 전송하여 서버 내부의 키 값을 강제 사용
             const response = await fetch('/api/coupang/debug-test', {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(DEMO_CREDS) // 현재 폼 상태가 아닌, 확정된 데모 값을 전송
+                body: JSON.stringify({
+                    useHardcoded: true // 이 플래그가 있으면 서버는 입력값을 무시하고 내부 키를 사용
+                })
             });
             
             const text = await response.text();
@@ -248,7 +248,7 @@ const Integration = () => {
             if (!response.ok) {
                  if (json.currentIp) json.currentIp = json.currentIp;
                  
-                 // 에러 상황에서도 사용된 키 값을 보여주기 위해 testResult에 부분 정보 저장
+                 // 에러 상황 처리
                  if (json.usedCredentials) {
                     setTestResult({
                         success: false,
@@ -258,7 +258,7 @@ const Integration = () => {
                             usedCredentials: json.usedCredentials
                         }
                     });
-                    throw new Error("API 요청 실패 (아래 상세 정보 확인)"); // 중복 Alert 방지를 위해 throw 하되 UI는 이미 설정됨
+                    throw new Error("API 요청 실패 (아래 상세 정보 확인)"); 
                  } else {
                     throw new Error(formatErrorData(json));
                  }
@@ -279,7 +279,6 @@ const Integration = () => {
 
         } catch (e: any) {
             console.error(e);
-            // 이미 위에서 setTestResult를 호출하지 않은 경우에만 여기서 호출
             if (!testResult) {
                 setTestResult((prev) => prev || {
                     success: false,
@@ -700,7 +699,7 @@ const Integration = () => {
                                                     </span>
                                                 )}
                                                 {testResult.details.count !== undefined && <span>🔍 발견: {testResult.details.count}건</span>}
-                                                {testResult.details.isDefaultKey && <span className="text-orange-600">⚠️ 기본 테스트 키 사용</span>}
+                                                {testResult.details.isDefaultKey && <span className="text-orange-600">⚠️ 키 강제 주입 모드</span>}
                                             </div>
 
                                             {/* 실제 사용된 키 값 표시 (디버깅용) */}

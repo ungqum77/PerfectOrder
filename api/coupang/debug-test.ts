@@ -18,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // 1. 숨겨진 문자, 공백, 따옴표 제거 함수 (입력값 정제 강화)
+  // 1. 숨겨진 문자, 공백, 따옴표 제거 함수
   const clean = (str: any) => {
       if (!str) return "";
       return String(str)
@@ -28,13 +28,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .trim();
   }
   
-  // 2. 환경변수에서 Proxy URL 가져오기
+  // 2. Proxy 설정
   const proxyUrl = process.env.FIXED_IP_PROXY_URL;
   const httpsAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
   
   let currentIp = 'Unknown';
-
-  // 3. 자격 증명 변수 선언
   let VENDOR_ID = "";
   let ACCESS_KEY = "";
   let SECRET_KEY = "";
@@ -53,23 +51,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         currentIp = "IP_CHECK_FAILED";
       }
 
-      // 4. 인증 정보 설정
       const body = req.body || {};
       
-      // 사용자 제공 하드코딩 값 (요청하신 값)
-      const DEFAULT_VENDOR = "A00934559";
-      const DEFAULT_ACCESS = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
-      const DEFAULT_SECRET = "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6";
+      // [중요] 정밀 진단 모드일 경우, 입력값과 상관없이 정확한 키 값을 강제 사용
+      // 이는 전송 과정에서의 인코딩 문제나 오타를 원천 차단하기 위함입니다.
+      if (body.useHardcoded) {
+          VENDOR_ID = "A00934559";
+          ACCESS_KEY = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
+          SECRET_KEY = "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6";
+          console.log("🛠️ [Debug] Using Hardcoded Credentials");
+      } else {
+          // 일반 입력 모드
+          VENDOR_ID = clean(body.vendorId);
+          ACCESS_KEY = clean(body.accessKey);
+          SECRET_KEY = clean(body.secretKey);
+      }
 
-      // 입력값이 있으면 사용하고, 없으면 하드코딩 값 사용
-      VENDOR_ID = clean(body.vendorId) || DEFAULT_VENDOR;
-      ACCESS_KEY = clean(body.accessKey) || DEFAULT_ACCESS;
-      SECRET_KEY = clean(body.secretKey) || DEFAULT_SECRET;
-
-      // 키 값 검증
-      if (!VENDOR_ID) throw new Error("Vendor ID가 유효하지 않습니다.");
-      if (!ACCESS_KEY) throw new Error("Access Key가 유효하지 않습니다.");
-      if (!SECRET_KEY) throw new Error("Secret Key가 유효하지 않습니다.");
+      if (!VENDOR_ID || !ACCESS_KEY || !SECRET_KEY) {
+          throw new Error("API 키 정보가 누락되었습니다.");
+      }
 
       // 5. 날짜 및 시간 생성
       const d = new Date();
@@ -81,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const ss = String(d.getUTCSeconds()).padStart(2, '0');
       const datetime = `${yy}${MM}${dd}T${HH}${mm}${ss}Z`;
 
-      // 6. 쿼리 스트링 (최근 2일간 조회)
+      // 6. 쿼리 스트링
       const nowKst = new Date(d.getTime() + (9 * 60 * 60 * 1000));
       const nextDayKst = new Date(nowKst);
       nextDayKst.setDate(nextDayKst.getDate() + 2);
@@ -109,6 +109,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const response = await axios.get(url, {
           headers: {
               'Content-Type': 'application/json',
+              'Accept': 'application/json', // 명시적 Accept 헤더 추가
               'Authorization': `HMAC-SHA256 ${ACCESS_KEY}:${signature}`,
               'X-Requested-By': VENDOR_ID,
               'X-Cou-Date': datetime,
@@ -126,9 +127,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           usedCredentials: {
               vendorId: VENDOR_ID,
               accessKey: ACCESS_KEY,
-              secretKey: SECRET_KEY
+              secretKey: SECRET_KEY.substring(0, 5) + "..." // 보안상 마스킹
           },
-          isDefaultKey: ACCESS_KEY === DEFAULT_ACCESS
+          isDefaultKey: body.useHardcoded
       });
 
   } catch (error: any) {
@@ -136,25 +137,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const status = error.response?.status || 500;
       
       let hint = "";
+      // 401 Unauthorized: 서명 불일치 or 키 권한 없음
       if (status === 401) {
-          hint = `❌ [401 인증 실패] 키 값 오류 또는 IP 차단.\n\n[진단 결과]\n1. Vendor ID, Access Key, Secret Key가 정확한지 아래 표시된 값을 확인하세요.\n2. 키가 정확하다면 쿠팡 OPEN API IP 설정에 [${currentIp}]가 등록되어 있는지 확인하세요.`;
-      } else if (status === 403) {
-          hint = `⛔ [403 접근 차단] IP [${currentIp}]가 아직 쿠팡에 등록되지 않았습니다.`;
-      } else if (!proxyUrl) {
-          hint = `⚠️ Proxy 설정 오류.`;
+          hint = `❌ [401 권한 없음]\n\n다음 3가지를 확인해주세요:\n1. 키 발급 시 '주문/배송 관리' 권한 체크박스를 선택했나요?\n2. 등록한 IP [${currentIp}]가 정확한가요?\n3. 방금 IP를 등록했다면 적용까지 최대 10분이 걸릴 수 있습니다.`;
+      } 
+      // 403 Forbidden: IP 차단
+      else if (status === 403) {
+          hint = `⛔ [403 접근 차단]\nIP [${currentIp}]가 쿠팡 화이트리스트에 없습니다.`;
+      } 
+      else if (!proxyUrl) {
+          hint = `⚠️ Proxy 설정 오류 또는 IP 변경됨.`;
       }
 
-      console.error(`[Debug Error] ${status}:`, JSON.stringify(errorData));
+      const errorText = typeof errorData === 'object' ? JSON.stringify(errorData) : String(errorData || error.message);
+      console.error(`[Debug Error] ${status}:`, errorText);
 
       res.status(status).json({
           error: 'Debug Failed',
-          details: errorData || error.message,
+          details: errorText,
           hint: hint,
           currentIp: currentIp,
           usedCredentials: {
               vendorId: VENDOR_ID,
               accessKey: ACCESS_KEY,
-              secretKey: SECRET_KEY
+              secretKey: SECRET_KEY ? "PROVIDED" : "MISSING"
           },
           proxyConfigured: !!proxyUrl
       });
