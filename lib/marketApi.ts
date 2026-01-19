@@ -31,7 +31,7 @@ export const marketApi = {
             }
 
             const json = await response.json();
-            
+
             // API 응답 구조를 앱 내부 Order 타입으로 매핑
             // (현재 /api/naver/fetch-orders는 간소화된 데이터만 반환하므로 Mock핑과 섞어서 처리)
             return (json.data || []).map((item: any) => ({
@@ -42,15 +42,15 @@ export const marketApi = {
                 productName: '네이버 스마트스토어 주문', // 상세 조회 미구현으로 인한 Placeholder
                 option: '기본',
                 amount: 0,
-                
+
                 ordererName: '네이버 고객',
                 ordererPhone: '010-0000-0000',
-                
+
                 receiverName: '네이버 고객',
                 receiverPhone: '010-0000-0000',
                 receiverAddress: '주소 정보 없음',
                 shippingMemo: '',
-                
+
                 date: new Date().toISOString().replace('T', ' ').substring(0, 19),
                 status: 'NEW',
                 courier: '',
@@ -69,7 +69,7 @@ export const marketApi = {
      */
     fetchCoupangOrders: async (credential: MarketAccount): Promise<Order[]> => {
         const { accessKey, secretKey, vendorId } = credential.credentials;
-        
+
         if (!accessKey || !secretKey || !vendorId) {
             console.error("쿠팡 인증 정보가 부족합니다.");
             return [];
@@ -88,7 +88,7 @@ export const marketApi = {
 
         try {
             // 병렬로 모든 상태 호출
-            const requests = targetStatuses.map(status => 
+            const requests = targetStatuses.map(status =>
                 fetch('/api/coupang/fetch-orders', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -97,22 +97,22 @@ export const marketApi = {
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
                         console.warn(`[Coupang Sync] ${status} 조회 실패:`, err);
-                        
+
                         // [중요] IP 차단(403)이나 권한 오류(401)는 빈 배열로 무시하지 않고 에러를 던져야 함
                         if (res.status === 403 || res.status === 401) {
                             let errorMsg = err.hint || err.details || `쿠팡 API 접근 권한 오류 (${res.status})`;
-                            
+
                             // 에러 객체 생성 및 currentIp 정보 확장
                             const customError: any = new Error(errorMsg);
                             customError.currentIp = err.currentIp; // 서버에서 전달받은 IP
                             throw customError;
                         }
-                        
+
                         // 그 외 일시적 오류는 로그만 남기고 빈 배열 반환 (전체 동기화가 멈추지 않도록)
-                        return []; 
+                        return [];
                     }
                     const json = await res.json();
-                    
+
                     if (json.debugInfo) {
                         console.log(`[Coupang Sync] ${status} 조회 범위: ${json.debugInfo.dateRange.from} ~ ${json.debugInfo.dateRange.to} (KST)`);
                     }
@@ -128,7 +128,7 @@ export const marketApi = {
             // 결과 평탄화 및 매핑
             results.forEach((items: any[], index) => {
                 const coupangStatus = targetStatuses[index];
-                
+
                 const mappedOrders = items.map((item: any) => {
                     const receiver = item.receiver || {};
                     const orderer = item.orderer || {};
@@ -143,19 +143,19 @@ export const marketApi = {
                         productName: item.vendorItemName || item.itemName || '상품명 미상',
                         option: item.vendorItemPackageName || '단품',
                         amount: item.orderPrice || 0,
-                        
+
                         ordererName: orderer.name || '구매자',
                         ordererPhone: orderer.safeNumber || '', // 안심번호
                         ordererId: orderer.email || '',
-                        
+
                         receiverName: receiver.name || orderer.name,
                         receiverPhone: receiver.safeNumber || '',
                         receiverAddress: `${receiver.addr1 || ''} ${receiver.addr2 || ''}`.trim(),
                         shippingMemo: item.deliveryRequestMessage || '',
-                        
+
                         date: item.orderedAt ? item.orderedAt.replace('T', ' ').substring(0, 19) : '',
                         paymentDate: item.paidAt ? item.paidAt.replace('T', ' ').substring(0, 19) : '',
-                        
+
                         // 상태 매핑
                         status: mapCoupangStatus(coupangStatus),
                         courier: item.deliveryCompanyName || '',
@@ -163,7 +163,7 @@ export const marketApi = {
                         customerName: orderer.name || '구매자' // 호환성
                     } as Order;
                 });
-                
+
                 allCoupangOrders = [...allCoupangOrders, ...mappedOrders];
             });
 
@@ -173,7 +173,7 @@ export const marketApi = {
         } catch (e: any) {
             console.error("쿠팡 연동 치명적 오류:", e.message);
             // 에러를 던져서 상위 컴포넌트(Header)가 Alert를 띄우게 함
-            throw e; 
+            throw e;
         }
     },
 
@@ -182,7 +182,7 @@ export const marketApi = {
      */
     syncAllMarkets: async (credentials: MarketAccount[]) => {
         let allOrders: Order[] = [];
-        
+
         for (const cred of credentials) {
             if (!cred.isActive) continue;
 
@@ -199,8 +199,55 @@ export const marketApi = {
                 }
             }
         }
-        
+
         return allOrders;
+    },
+
+    /**
+     * 주문 데이터를 Supabase에 저장 (Upsert)
+     */
+    saveOrdersToSupabase: async (orders: Order[]) => {
+        if (!orders || orders.length === 0) return { count: 0, error: null };
+
+        // DB 컬럼네임으로 매핑 (snake_case)
+        const dbRows = orders.map(o => ({
+            id: o.id,
+            platform: o.platform,
+            order_number: o.orderNumber,
+            product_id: o.productId,
+            product_name: o.productName,
+            option: o.option,
+            amount: o.amount,
+
+            orderer_name: o.ordererName,
+            orderer_phone: o.ordererPhone,
+            orderer_id: o.ordererId,
+
+            receiver_name: o.receiverName,
+            receiver_phone: o.receiverPhone,
+            receiver_address: o.receiverAddress,
+            shipping_memo: o.shippingMemo,
+
+            date: o.date ? new Date(o.date).toISOString() : null,
+            payment_date: o.paymentDate ? new Date(o.paymentDate).toISOString() : null,
+            status: o.status,
+            courier: o.courier || '',
+            invoice_number: o.invoiceNumber || '',
+
+            updated_at: new Date().toISOString()
+        }));
+
+        const { data, error } = await supabase
+            .from('orders')
+            .upsert(dbRows, { onConflict: 'id' }) // ID 충돌 시 업데이트
+            .select();
+
+        if (error) {
+            console.error("[Supabase Save Error]", error);
+            return { count: 0, error };
+        }
+
+        return { count: data?.length || 0, error: null };
     }
 };
 
