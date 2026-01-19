@@ -116,24 +116,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const queryString = `createdAtFrom=${createdAtFrom}&createdAtTo=${createdAtTo}&status=${targetStatus}`;
 
     // 5. 서명 생성
+    // 5. 서명 생성
     const message = datetime + method + path + '?' + queryString;
     const hmac = createHmac('sha256', cleanSecretKey);
     hmac.update(message);
     const signature = hmac.digest('hex');
 
+    // [DEBUG] 서명 생성 정보 로깅 (비밀번호 마스킹)
+    console.log(`[Coupang Debug] VendorID: ${cleanVendorId}`);
+    console.log(`[Coupang Debug] Message To Sign: ${message}`);
+    console.log(`[Coupang Debug] Generated Signature: ${signature.substring(0, 10)}...`);
+
     const url = `https://api-gateway.coupang.com${path}?${queryString}`;
 
     // 6. API 호출
+    const headers: Record<string, string> = {
+      'Authorization': `HMAC-SHA256 ${cleanAccessKey}:${signature}`,
+      'X-Requested-By': cleanVendorId,
+      'X-Cou-Date': datetime,
+      'User-Agent': 'PerfectOrder/1.0',
+      'Accept': 'application/json'
+    };
+
     const apiResponse = await axios({
       method: method,
       url: url,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `HMAC-SHA256 ${cleanAccessKey}:${signature}`,
-        'X-Requested-By': cleanVendorId,
-        'X-Cou-Date': datetime,
-        'User-Agent': 'PerfectOrder/1.0'
-      },
+      headers: headers,
       httpsAgent: httpsAgent,
       proxy: false,
       validateStatus: () => true
