@@ -100,10 +100,10 @@ export async function POST(request: Request) {
         const response = await axios.get(url, {
             headers: {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json', // 명시적 Accept 헤더 추가
-                'Authorization': `HMAC-SHA256 ${ACCESS_KEY}:${signature}`,
+                'Accept': 'application/json',
+                'Authorization': `CEA algorithm=HmacSHA256, access-key=${ACCESS_KEY}, signed-date=${datetime}, signature=${signature}`,
                 'X-Requested-By': VENDOR_ID,
-                'X-Cou-Date': datetime,
+                // 'X-Cou-Date': datetime, // CEA 방식에서는 signed-date가 포함되므로 X-Cou-Date 불필요할 수 있으나 호환성 위해 유지 (또는 제거) -> 문서상 CEA에선 제거 권장일 수 있음. 일단 제거하고 signed-date에 의존.
             },
             httpsAgent,
             proxy: false
