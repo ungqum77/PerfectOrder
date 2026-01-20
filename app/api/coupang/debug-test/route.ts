@@ -114,7 +114,8 @@ export async function POST(request: Request) {
             message: `✅ 인증 성공!\n\n현재 IP [${currentIp}]는 정상 허용 중입니다.\nAPI 연결에 성공하였습니다.`,
             data: response.data,
             currentIp: currentIp,
-            proxyUsed: !!proxyUrl,
+            proxyConfigured: !!proxyUrl,
+            proxyUrl: proxyUrl ? proxyUrl.replace(/:[^:]*@/, ':****@') : "NOT_SET",
             usedCredentials: {
                 vendorId: VENDOR_ID,
                 accessKey: ACCESS_KEY,

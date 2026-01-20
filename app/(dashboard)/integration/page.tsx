@@ -259,7 +259,9 @@ const IntegrationPage = () => {
                         message: formatErrorData(json),
                         details: {
                             ip: json.currentIp,
-                            usedCredentials: json.usedCredentials
+                            usedCredentials: json.usedCredentials,
+                            proxyConfigured: json.proxyConfigured,
+                            proxyUrl: json.proxyUrl
                         }
                     });
                     throw new Error("API 요청 실패 (아래 상세 정보 확인)");
