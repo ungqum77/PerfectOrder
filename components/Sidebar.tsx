@@ -67,8 +67,8 @@ export const Sidebar = () => {
                             key={item.path}
                             href={item.path}
                             className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group ${active
-                                    ? 'bg-primary-50 text-primary-600'
-                                    : 'hover:bg-slate-50 text-slate-500 hover:text-slate-900'
+                                ? 'bg-primary-50 text-primary-600'
+                                : 'hover:bg-slate-50 text-slate-500 hover:text-slate-900'
                                 }`}
                         >
                             <item.icon
@@ -86,16 +86,30 @@ export const Sidebar = () => {
             <div className="p-4 border-t border-slate-100">
                 <div className="mb-4 px-2">
                     {!hasAccess && user?.role !== 'ADMIN' && (
-                        <div className="bg-orange-50 p-3 rounded-lg border border-orange-100 mb-2">
-                            <p className="text-xs font-bold text-orange-700">체험 기간이 만료되었습니다.</p>
-                            <Link href="/subscription" className="text-[10px] text-orange-600 underline mt-1 block">구독하러 가기 &rarr;</Link>
+                        <div className="bg-gradient-to-br from-red-50 to-orange-50 p-4 rounded-xl border border-red-100 mb-2 shadow-sm">
+                            <div className="flex items-center gap-2 mb-2 text-red-600">
+                                <AlertTriangle size={16} className="shrink-0" />
+                                <p className="text-xs font-bold">체험 기간 만료</p>
+                            </div>
+                            <p className="text-[10px] text-red-500 mb-3 leading-relaxed">
+                                서비스 이용을 위해<br />구독을 갱신해주세요.
+                            </p>
+                            <Link
+                                href="/subscription"
+                                className="block w-full text-center py-2 bg-white border border-red-200 text-red-600 text-[10px] font-bold rounded-lg hover:bg-red-50 transition-colors shadow-sm"
+                            >
+                                구독하러 가기 &rarr;
+                            </Link>
                         </div>
                     )}
                     {hasAccess && user?.plan === 'FREE' && user?.trialEndsAt && (
-                        <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-2">
-                            <p className="text-xs font-bold text-blue-700">무료 체험 중</p>
-                            <p className="text-[10px] text-blue-500">
-                                {new Date(user.trialEndsAt).toLocaleDateString()} 까지
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mb-2">
+                            <div className="flex items-center gap-2 mb-1 text-blue-700">
+                                <CreditCard size={14} />
+                                <p className="text-xs font-bold">무료 체험 중</p>
+                            </div>
+                            <p className="text-[10px] text-blue-500 pl-6">
+                                <span className="font-bold">{new Date(user.trialEndsAt).toLocaleDateString()}</span> 까지
                             </p>
                         </div>
                     )}
