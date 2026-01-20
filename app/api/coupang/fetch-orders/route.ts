@@ -105,11 +105,11 @@ export async function POST(request: Request) {
 
         const axiosRes = await cleanAxios.get(finalUrl, {
             headers: {
-                'Authorization': `HMAC-SHA256 ${aKey}:${signature}`,
+                'Authorization': `CEA algorithm=HmacSHA256, access-key=${aKey}, signed-date=${datetime}, signature=${signature}`,
                 'X-Requested-By': vId,
-                'X-Cou-Date': datetime,
                 'User-Agent': 'PerfectOrder/2.0',
                 'Accept': 'application/json'
+                // 'X-Cou-Date': datetime, // CEA 방식에선 생략 가능 또는 signed-date로 대체
             },
             httpsAgent: agent,
             proxy: false, // axios 내부 proxy 로직 비활성화 (agent 사용)
