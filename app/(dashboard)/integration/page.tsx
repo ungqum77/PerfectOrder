@@ -218,21 +218,22 @@ const IntegrationPage = () => {
         setTestLoading(true);
         setTestResult(null);
 
-        // UI에 보여줄 값 (사용자 확인용)
-        const DEMO_CREDS = {
-            vendorId: "A00934559",
-            accessKey: "d21f5515-e7b1-4e4a-ab64-353ffde02371",
-            secretKey: "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6"
-        };
-        setFormCredentials(DEMO_CREDS);
+        if (!formCredentials.vendorId || !formCredentials.accessKey || !formCredentials.secretKey) {
+            alert("먼저 Vendor ID, Access Key, Secret Key를 모두 입력해주세요.");
+            setTestLoading(false);
+            return;
+        }
 
         try {
-            // [중요] useHardcoded: true를 전송하여 서버 내부의 키 값을 강제 사용
+            // [수정] 입력된 자격증명 사용하여 테스트
             const response = await fetch('/api/coupang/debug-test', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    useHardcoded: true // 이 플래그가 있으면 서버는 입력값을 무시하고 내부 키를 사용
+                    useHardcoded: false,
+                    vendorId: formCredentials.vendorId,
+                    accessKey: formCredentials.accessKey,
+                    secretKey: formCredentials.secretKey
                 })
             });
 

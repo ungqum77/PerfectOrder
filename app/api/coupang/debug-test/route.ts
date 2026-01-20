@@ -46,17 +46,10 @@ export async function POST(request: Request) {
 
         // [중요] 정밀 진단 모드일 경우, 입력값과 상관없이 정확한 키 값을 강제 사용
         // 이는 전송 과정에서의 인코딩 문제나 오타를 원천 차단하기 위함입니다.
-        if (body.useHardcoded) {
-            VENDOR_ID = "A00934559";
-            ACCESS_KEY = "d21f5515-e7b1-4e4a-ab64-353ffde02371";
-            SECRET_KEY = "b8737eac85e4a8510a8db7b5be89ae5ee0a2f3e6";
-            console.log("🛠️ [Debug] Using Hardcoded Credentials");
-        } else {
-            // 일반 입력 모드
-            VENDOR_ID = clean(body.vendorId);
-            ACCESS_KEY = clean(body.accessKey);
-            SECRET_KEY = clean(body.secretKey);
-        }
+        // [수정] 하드코딩된 데모 키 로직 제거 -> 사용자 입력값 사용
+        VENDOR_ID = clean(body.vendorId);
+        ACCESS_KEY = clean(body.accessKey);
+        SECRET_KEY = clean(body.secretKey);
 
         if (!VENDOR_ID || !ACCESS_KEY || !SECRET_KEY) {
             throw new Error("API 키 정보가 누락되었습니다.");
