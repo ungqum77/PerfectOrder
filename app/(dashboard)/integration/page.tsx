@@ -109,19 +109,20 @@ const formatErrorData = (json: any) => {
         if (typeof json.details === 'object') {
             // 쿠팡 에러 포맷 ({code, message}) 인 경우 보기 좋게
             if (json.details.message) {
-                detailPart = `Server Msg: ${json.details.message}`;
-                if (json.details.code) detailPart = `[${json.details.code}] ${detailPart}`;
+                detailPart = json.details.message;
             } else {
-                detailPart = JSON.stringify(json.details, null, 2);
+                // 너무 긴 JSON은 "상세 정보 확인"으로 대체하거나 요약
+                detailPart = "서버에서 반환된 상세 에러가 있습니다. (개발자 도구 확인)";
             }
         } else {
             detailPart = String(json.details);
         }
     }
 
-    let msg = `${errorPart}`;
-    if (detailPart) msg += `\n${detailPart}`;
-    if (json.hint) msg += `\n\n💡 힌트: ${json.hint}`;
+    let msg = errorPart;
+    if (detailPart) msg += `\n\n${detailPart}`;
+    // 힌트는 별도 UI로 보여주는 게 좋으므로 여기선 제외하거나 간단히
+    if (json.hint) msg += `\n\n💡 ${json.hint}`;
 
     return msg;
 };
@@ -479,8 +480,8 @@ const IntegrationPage = () => {
                                                 setIsModalOpen(false);
                                             }}
                                             className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${selectedPlatform === market.platform
-                                                    ? 'bg-white border-primary-500 text-primary-700 font-bold shadow-sm ring-1 ring-primary-100'
-                                                    : 'bg-transparent border-transparent hover:bg-slate-100 text-slate-600'
+                                                ? 'bg-white border-primary-500 text-primary-700 font-bold shadow-sm ring-1 ring-primary-100'
+                                                : 'bg-transparent border-transparent hover:bg-slate-100 text-slate-600'
                                                 }`}
                                         >
                                             <div className="flex items-center gap-3">
@@ -683,8 +684,8 @@ const IntegrationPage = () => {
                                 {/* 테스트 결과 표시 영역 */}
                                 {testResult && (
                                     <div className={`p-4 rounded-xl border text-sm animate-fade-in ${testResult.success
-                                            ? 'bg-green-50 border-green-200 text-green-700'
-                                            : 'bg-red-50 border-red-200 text-red-700'
+                                        ? 'bg-green-50 border-green-200 text-green-700'
+                                        : 'bg-red-50 border-red-200 text-red-700'
                                         }`}>
                                         <div className="flex items-start gap-3">
                                             {testResult.success ? <CheckCircle2 size={18} className="shrink-0 mt-0.5" /> : <AlertTriangle size={18} className="shrink-0 mt-0.5" />}
@@ -748,7 +749,7 @@ const IntegrationPage = () => {
                                         onClick={handleDebugWithInputs}
                                         className="w-full text-xs text-indigo-500 font-bold hover:underline flex items-center justify-center gap-1 mt-1 opacity-80 hover:opacity-100 bg-indigo-50 py-2 rounded-lg border border-indigo-100"
                                     >
-                                        <Stethoscope size={14} /> 정밀 진단 (테스트 계정 자동 입력)
+                                        <Stethoscope size={14} /> 키/IP 정밀 진단 (샘플 계정)
                                     </button>
                                 )}
                             </div>

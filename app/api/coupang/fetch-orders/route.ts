@@ -18,8 +18,11 @@ export async function POST(request: Request) {
         const body = await request.json();
         const { vendorId, accessKey, secretKey, status } = body;
 
-        // 공백 제거 정제
-        const clean = (s: any) => String(s || '').trim();
+        // 공백 및 따옴표 제거 정제
+        const clean = (s: any) => String(s || '')
+            .replace(/\s+/g, '')
+            .replace(/['"“”‘’]/g, '')
+            .trim();
         const vId = clean(vendorId).toUpperCase();
         const aKey = clean(accessKey);
         const sKey = clean(secretKey);

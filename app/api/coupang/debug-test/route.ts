@@ -7,9 +7,11 @@ export const maxDuration = 10;
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
+    let message = "";
     // 1. 숨겨진 문자, 공백, 따옴표 제거 함수
     const clean = (str: any) => {
         if (!str) return "";
+        return String(str)
         return String(str)
             .replace(/\s+/g, '') // 공백 제거
             .replace(/[\u200B-\u200D\uFEFF]/g, '') // 투명 문자 제거
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
 
         // 7. 서명 생성
         const method = 'GET';
-        const message = datetime + method + path + '?' + queryString;
+        message = datetime + method + path + '?' + queryString;
 
         const hmac = createHmac('sha256', SECRET_KEY);
         hmac.update(message);
@@ -151,7 +153,8 @@ export async function POST(request: Request) {
                 accessKey: ACCESS_KEY,
                 secretKey: SECRET_KEY ? "PROVIDED" : "MISSING"
             },
-            proxyConfigured: !!proxyUrl
+            proxyConfigured: !!proxyUrl,
+            debug: { messageToSign: message }
         }, { status: status });
     }
 }
