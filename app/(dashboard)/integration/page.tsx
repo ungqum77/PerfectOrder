@@ -144,7 +144,8 @@ const IntegrationPage = () => {
             ip?: string,
             count?: number,
             status?: string,
-            proxy?: boolean,
+            proxyConfigured?: boolean,
+            proxyUrl?: string,
             usedCredentials?: { vendorId: string, accessKey: string, secretKey: string },
             isDefaultKey?: boolean
         }
@@ -274,7 +275,8 @@ const IntegrationPage = () => {
                     ip: json.currentIp,
                     count: json.data?.length || 0,
                     status: 'DEBUG MODE',
-                    proxy: json.proxyUsed,
+                    proxyConfigured: json.proxyUsed,
+                    proxyUrl: json.proxyUrl,
                     usedCredentials: json.usedCredentials,
                     isDefaultKey: json.isDefaultKey
                 }
