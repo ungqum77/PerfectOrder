@@ -154,6 +154,7 @@ export async function POST(request: Request) {
                 secretKey: SECRET_KEY ? "PROVIDED" : "MISSING"
             },
             proxyConfigured: !!proxyUrl,
+            proxyUrl: proxyUrl ? proxyUrl.replace(/:[^:]*@/, ':****@') : "NOT_SET",
             debug: { messageToSign: message }
         }, { status: status });
     }

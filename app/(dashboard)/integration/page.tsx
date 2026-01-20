@@ -347,22 +347,32 @@ const IntegrationPage = () => {
                 // 성공 시 로직
                 const count = json.data ? json.data.length : 0;
                 let message = `✅ 연동 성공! (HTTP 200 OK)\n`;
-
-                if (count > 0) {
-                    message += `최근 24시간 내 ${count}건의 신규 주문(결제완료)을 발견했습니다.`;
+                if (json.error) {
+                    setTestResult({
+                        success: false,
+                        message: json.hint || json.error, // 에러 메시지 우선순위 조정
+                        details: json // data 전체를 details로 저장해서 필드 접근 가능하게 함
+                    });
                 } else {
-                    message += `자격 증명은 유효합니다. 다만, 최근 24시간 내 '결제완료' 상태의 주문이 0건입니다.`;
-                }
+                    const count = json.data ? json.data.length : 0;
+                    let message = `✅ 연동 성공! (HTTP 200 OK)\n`;
 
-                setTestResult({
-                    success: true,
-                    message: message,
-                    details: {
-                        ip: json.currentIp,
-                        count: count,
-                        status: 'ACCEPT (결제완료)'
+                    if (count > 0) {
+                        message += `최근 24시간 내 ${count}건의 신규 주문(결제완료)을 발견했습니다.`;
+                    } else {
+                        message += `자격 증명은 유효합니다. 다만, 최근 24시간 내 '결제완료' 상태의 주문이 0건입니다.`;
                     }
-                });
+
+                    setTestResult({
+                        success: true,
+                        message: message,
+                        details: {
+                            ip: json.currentIp,
+                            count: count,
+                            status: 'ACCEPT (결제완료)'
+                        }
+                    });
+                }
 
             } else if (selectedPlatform === 'NAVER') {
                 const orders = await marketApi.fetchNaverOrders(tempAccount);
@@ -696,13 +706,16 @@ const IntegrationPage = () => {
                                             <div className="mt-3 pt-3 border-t border-green-200/50 flex flex-col gap-2 text-xs font-medium opacity-90">
                                                 <div className="flex flex-wrap gap-4">
                                                     {testResult.details.ip && <span>📡 IP: {testResult.details.ip}</span>}
-                                                    {testResult.details.proxy !== undefined && (
-                                                        <span className={`flex items-center gap-1 ${testResult.details.proxy ? 'text-indigo-600' : 'text-slate-400'}`}>
-                                                            <Network size={12} /> {testResult.details.proxy ? '프록시 켜짐' : '프록시 꺼짐'}
+                                                    {testResult.details.proxyConfigured !== undefined && (
+                                                        <span className={`flex items-center gap-1 font-bold ${testResult.details.proxyConfigured ? 'text-indigo-600' : 'text-red-500'}`}>
+                                                            <Network size={12} />
+                                                            {testResult.details.proxyConfigured ? '프록시 설정됨' : '프록시 미설정(Direct)'}
                                                         </span>
                                                     )}
+                                                    {testResult.details.proxyUrl && (
+                                                        <span className="text-slate-400 text-[10px] self-center">({testResult.details.proxyUrl})</span>
+                                                    )}
                                                     {testResult.details.count !== undefined && <span>🔍 발견: {testResult.details.count}건</span>}
-                                                    {testResult.details.isDefaultKey && <span className="text-orange-600">⚠️ 키 강제 주입 모드</span>}
                                                 </div>
 
                                                 {/* 실제 사용된 키 값 표시 (디버깅용) */}
