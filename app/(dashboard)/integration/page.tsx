@@ -767,7 +767,7 @@ const IntegrationPage = () => {
                                         onClick={handleDebugWithInputs}
                                         className="w-full text-xs text-indigo-500 font-bold hover:underline flex items-center justify-center gap-1 mt-1 opacity-80 hover:opacity-100 bg-indigo-50 py-2 rounded-lg border border-indigo-100"
                                     >
-                                        <Stethoscope size={14} /> 키/IP 정밀 진단 (샘플 계정)
+                                        <Stethoscope size={14} /> 키/IP 정밀 진단 (입력한 정보로 테스트)
                                     </button>
                                 )}
                             </div>
