@@ -1,0 +1,5 @@
+_BACKUP/
+node_modules/
+.next/
+out/
+build/
