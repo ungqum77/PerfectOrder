@@ -1,0 +1,137 @@
+import { Order, Claim, SalesStat } from './types';
+
+export const MOCK_ORDERS: Order[] = [
+  {
+    id: '1',
+    platform: 'NAVER',
+    orderNumber: '20240520-0001',
+    productId: 'N-123456',
+    productName: '프리미엄 1++ 한우 세트 (500g)',
+    option: '기본 포장',
+    amount: 125000,
+    ordererName: '김민수',
+    ordererPhone: '010-1234-5678',
+    ordererId: 'kim_minsu',
+    receiverName: '이영희',
+    receiverPhone: '010-9876-5432',
+    receiverAddress: '서울시 강남구 테헤란로 123, 101호',
+    shippingMemo: '문 앞에 놔주세요',
+    date: '2024-05-20 14:30:00',
+    paymentDate: '2024-05-20 14:31:00',
+    status: 'NEW',
+    customerName: '김민수' // 호환성
+  },
+  {
+    id: '2',
+    platform: 'COUPANG',
+    orderNumber: '20240520-0002',
+    productId: 'C-998877',
+    productName: '오가닉 코튼 호텔 수건 10p',
+    option: '다크 그레이',
+    amount: 35000,
+    ordererName: '이지현',
+    ordererPhone: '010-5555-6666',
+    ordererId: 'jihyun_lee',
+    receiverName: '이지현',
+    receiverPhone: '010-5555-6666',
+    receiverAddress: '경기도 성남시 분당구 판교로 55, 202호',
+    shippingMemo: '부재시 경비실',
+    date: '2024-05-20 15:00:00',
+    paymentDate: '2024-05-20 15:00:15',
+    status: 'NEW',
+    customerName: '이지현'
+  },
+  {
+    id: '3',
+    platform: '11ST',
+    orderNumber: '20240519-0042',
+    productId: '11-456789',
+    productName: '무선 기계식 키보드',
+    option: '적축 / 화이트',
+    amount: 142000,
+    ordererName: '박도산',
+    ordererPhone: '010-1111-2222',
+    receiverName: '박도산',
+    receiverPhone: '010-1111-2222',
+    receiverAddress: '부산시 해운대구 마린시티 1로, 303호',
+    shippingMemo: '배송 전 연락바랍니다',
+    date: '2024-05-19 09:15:00',
+    status: 'PENDING',
+    customerName: '박도산'
+  },
+  {
+    id: '4',
+    platform: 'NAVER',
+    orderNumber: '20240519-0015',
+    productId: 'N-777888',
+    productName: '비타민 C 1000mg',
+    option: '3개월분',
+    amount: 28000,
+    ordererName: '최수진',
+    ordererPhone: '010-3333-4444',
+    receiverName: '최수진',
+    receiverPhone: '010-3333-4444',
+    receiverAddress: '인천시 송도구 송도대로 99, 405호',
+    shippingMemo: '빠른 배송 부탁드려요',
+    date: '2024-05-19 11:20:00',
+    status: 'SHIPPING',
+    invoiceNumber: '6453-2213-4421',
+    courier: 'CJ대한통운',
+    customerName: '최수진'
+  },
+  {
+    id: '5',
+    platform: 'GMARKET',
+    orderNumber: '20240518-0112',
+    productId: 'G-112233',
+    productName: '초경량 캠핑 의자',
+    option: '베이지',
+    amount: 45000,
+    ordererName: '정우성',
+    ordererPhone: '010-7777-8888',
+    receiverName: '정우성',
+    receiverPhone: '010-7777-8888',
+    receiverAddress: '강원도 강릉시 해안로 50, 501호',
+    shippingMemo: '',
+    date: '2024-05-18 16:45:00',
+    status: 'DELIVERED',
+    invoiceNumber: '1123-5567-8890',
+    courier: '롯데택배',
+    customerName: '정우성'
+  }
+];
+
+export const MOCK_CLAIMS: Claim[] = [
+  {
+    id: 'c1',
+    type: 'RETURN',
+    orderId: '20240515-0033',
+    productName: '여름 린넨 셔츠',
+    customerName: '강하늘',
+    reason: '상세 설명과 실제 사이즈가 다릅니다.',
+    status: 'REQUESTED',
+    date: '2024-05-20',
+    images: ['https://picsum.photos/400/400', 'https://picsum.photos/401/401']
+  },
+  {
+    id: 'c2',
+    type: 'CANCEL',
+    orderId: '20240519-0012',
+    productName: '게이밍 마우스 장패드',
+    customerName: '송혜교',
+    reason: '단순 변심',
+    status: 'APPROVED',
+    date: '2024-05-19',
+    images: []
+  }
+];
+
+export const SALES_DATA: SalesStat[] = [
+  { date: '05/15', amount: 1200000, orders: 45 },
+  { date: '05/16', amount: 1450000, orders: 52 },
+  { date: '05/17', amount: 980000, orders: 38 },
+  { date: '05/18', amount: 2100000, orders: 85 },
+  { date: '05/19', amount: 1850000, orders: 64 },
+  { date: '05/20', amount: 2450000, orders: 92 },
+  { date: '05/21', amount: 1650000, orders: 58 },
+];
